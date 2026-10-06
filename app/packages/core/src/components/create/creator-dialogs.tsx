@@ -1,6 +1,5 @@
 "use client";
 
-import { RemoteImage } from "@workspace/core/components/common/remote-image";
 import {
   createNewCharacter,
   deleteCurrentCharacter,
@@ -27,13 +26,6 @@ import {
   presetSelection,
   type TraitField,
 } from "@workspace/vnccs/character-presets";
-import {
-  allStyles,
-  applyStyle,
-  customStyle,
-  resolveStyleId,
-  stylePreviewPath,
-} from "@workspace/vnccs/character-styles";
 import {
   CHARACTER_NAME_PATTERN,
   fetchWizardDownloadStatus,
@@ -186,12 +178,12 @@ export function WizardDialog({ onClose }: { onClose: () => void }) {
   const [phase, setPhase] = useState<WizardPhase>({ kind: "describe" });
   const [error, setError] = useState<string | null>(null);
   const open = useRef(true);
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    open.current = true;
+    return () => {
       open.current = false;
-    },
-    []
-  );
+    };
+  }, []);
 
   const fill = async () => {
     setPhase({ kind: "thinking" });
@@ -430,134 +422,6 @@ export function PresetDialog({
             }}
           >
             Apply
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-export function StylePreview({
-  className,
-  image,
-}: {
-  className?: string;
-  image?: string;
-}) {
-  const [failed, setFailed] = useState(false);
-  const path = image ? stylePreviewPath({ image }) : null;
-  return (
-    <span
-      className={cn(
-        "flex items-center justify-center overflow-hidden bg-muted text-muted-foreground text-xs",
-        className
-      )}
-    >
-      {path && !failed ? (
-        <RemoteImage
-          className="size-full object-cover"
-          loading="lazy"
-          onError={() => setFailed(true)}
-          src={studioHttp().mediaUrl(path)}
-        />
-      ) : (
-        "Preview"
-      )}
-    </span>
-  );
-}
-
-/** The style library as a picker. Editing the library is a separate screen. */
-export function StyleDialog({ onClose }: { onClose: () => void }) {
-  const styles = useCreatorStore((store) => store.styles);
-  const current = useCreatorStore((store) =>
-    resolveStyleId(styles, store.state?.character_info.style)
-  );
-  const update = useCreatorStore((store) => store.update);
-  const [query, setQuery] = useState("");
-  const [group, setGroup] = useState("");
-  const entries = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    return [{ ...customStyle(styles), group: "" }, ...allStyles(styles)].filter(
-      (style) =>
-        (!group || style.group === group) &&
-        [style.label, style.description, style.reference]
-          .join(" ")
-          .toLowerCase()
-          .includes(needle)
-    );
-  }, [styles, query, group]);
-
-  const choose = (id: string) => {
-    update((model) => {
-      Object.assign(
-        model.state.character_info,
-        applyStyle(styles, model.state.character_info, id)
-      );
-    });
-    onClose();
-  };
-
-  return (
-    <Dialog onOpenChange={closeOnDismiss(onClose)} open={true}>
-      <DialogContent className="sm:max-w-4xl">
-        <DialogHeader>
-          <DialogTitle>Style library</DialogTitle>
-          <DialogDescription>
-            {entries.length ? `${entries.length} styles` : "No matching styles"}
-          </DialogDescription>
-        </DialogHeader>
-        <div className="flex flex-wrap gap-2">
-          <Input
-            aria-label="Search styles"
-            autoFocus={true}
-            className="min-w-48 flex-1"
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search styles..."
-            value={query}
-          />
-          <select
-            aria-label="Style category"
-            className="h-9 rounded-md border bg-transparent px-2 text-sm"
-            onChange={(event) => setGroup(event.target.value)}
-            value={group}
-          >
-            <option value="">All categories</option>
-            {styles.groups.map((item) => (
-              <option key={item.label} value={item.label}>
-                {item.label}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="grid max-h-[60vh] grid-cols-[repeat(auto-fill,minmax(9rem,1fr))] gap-3 overflow-y-auto pr-1">
-          {entries.map((style) => (
-            <button
-              aria-pressed={style.id === current}
-              className={cn(
-                "flex flex-col overflow-hidden rounded-lg border text-left transition-colors hover:border-primary/60",
-                style.id === current && "border-primary ring-2 ring-primary/40"
-              )}
-              key={style.id}
-              onClick={() => choose(style.id)}
-              title={[style.description, style.reference]
-                .filter(Boolean)
-                .join("\n")}
-              type="button"
-            >
-              <StylePreview
-                className="aspect-square w-full"
-                image={style.image}
-              />
-              <span className="truncate px-2 py-1.5 font-medium text-xs">
-                {style.label}
-              </span>
-            </button>
-          ))}
-        </div>
-        <DialogFooter>
-          <Button onClick={onClose} variant="outline">
-            Close
           </Button>
         </DialogFooter>
       </DialogContent>

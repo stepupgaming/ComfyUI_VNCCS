@@ -8,6 +8,8 @@ export interface CharacterStyle {
   label: string;
   prompt?: string;
   reference?: string;
+  /** Set by the server on styles from the user library. */
+  user?: boolean;
 }
 
 export interface StyleGroup {

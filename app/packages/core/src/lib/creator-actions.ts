@@ -22,9 +22,14 @@ import { usePoseStudioStore } from "@workspace/core/stores/pose-studio-store";
 import { nativeSeedvrProblem } from "@workspace/vnccs/character-generator";
 import { fetchPresetCatalog } from "@workspace/vnccs/character-presets";
 import {
+  applyStyle,
+  type CharacterStyle,
+  CUSTOM_STYLE_ID,
   defaultStyleId,
   EMPTY_STYLE_CATALOG,
   fetchStyleCatalog,
+  findStyle,
+  type StyleCatalog,
 } from "@workspace/vnccs/character-styles";
 import {
   cachedPreviewUrl,
@@ -47,6 +52,20 @@ import {
   buildCharacterCreatorPrompt,
   CREATOR_IDS,
 } from "@workspace/vnccs/graphs";
+import {
+  deleteUserStyle,
+  generateStylePreview,
+  isUserStyleId,
+  removeStyle,
+  type StyleDraft,
+  saveUserStyle,
+  setStyleImage,
+  stylePreviewMessage,
+  stylePreviewRequest,
+  stylePreviewStage,
+  upsertUserStyle,
+  validateStyleDraft,
+} from "@workspace/vnccs/style-library";
 import { toast } from "sonner";
 
 /**
@@ -69,6 +88,7 @@ function requestGuard() {
 const beginCharacterRequest = requestGuard();
 const beginPreviewRequest = requestGuard();
 const beginWizardRequest = requestGuard();
+const beginStyleCatalogRequest = requestGuard();
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -432,4 +452,169 @@ export async function runWizard(description: string): Promise<boolean> {
   }
   store().update((model) => model.applyWizardData(data));
   return true;
+}
+
+// --- Style library (`web/character_styles.mjs`) ------------------------------
+
+/** Style preview events carry this in place of a graph node id. */
+export const STYLE_PREVIEW_NODE_ID = "studio";
+let stylePreviewCounter = 0;
+
+function selectedStyleId(): string | undefined {
+  return store().state?.character_info.style;
+}
+
+/** Pick a style and copy its text into the character. */
+export function selectStyle(
+  id: string,
+  catalog: StyleCatalog = store().styles
+) {
+  store().update((model) => {
+    Object.assign(
+      model.state.character_info,
+      applyStyle(catalog, model.state.character_info, id)
+    );
+  });
+}
+
+/** Re-read the library from the server; a local save or delete makes the reply stale. */
+export async function refreshStyleLibrary(): Promise<boolean> {
+  const isCurrent = beginStyleCatalogRequest();
+  const styles = await fetchStyleCatalog(studioHttp());
+  if (!isCurrent()) {
+    return false;
+  }
+  store().set({ styles });
+  return true;
+}
+
+/** Save a user style, add it to the library and select it, as the widget did. */
+export async function saveStyle(draft: StyleDraft): Promise<CharacterStyle> {
+  const problem = validateStyleDraft(draft);
+  if (problem) {
+    throw new Error(problem);
+  }
+  const style = await saveUserStyle(studioHttp(), draft);
+  beginStyleCatalogRequest();
+  const styles = upsertUserStyle(store().styles, style);
+  store().set({ styles });
+  selectStyle(style.id, styles);
+  return style;
+}
+
+/** Delete a user style; a selected one falls back to the library's default style. */
+export async function deleteStyle(id: string): Promise<void> {
+  await deleteUserStyle(studioHttp(), id);
+  beginStyleCatalogRequest();
+  const styles = removeStyle(store().styles, id);
+  store().set({ styles });
+  if (selectedStyleId() === id) {
+    selectStyle(defaultStyleId(styles), styles);
+  }
+}
+
+/** Built-in previews ship with VNCCS and are never re-rendered from the Studio. */
+export function canRenderStylePreview(id: string): boolean {
+  return id === CUSTOM_STYLE_ID || isUserStyleId(id);
+}
+
+export function stylePreviewRunning(): boolean {
+  const stage = store().stylePreview?.stage;
+  return stage === "queued" || stage === "running";
+}
+
+/**
+ * Render one style's portrait with seed 0 and the current Creator settings,
+ * then point the library card at the saved WebP. Resolves true on success.
+ */
+export async function renderStylePreview(styleId: string): Promise<boolean> {
+  if (stylePreviewRunning()) {
+    return false;
+  }
+  stylePreviewCounter += 1;
+  const requestId = `${Date.now()}-${stylePreviewCounter}`;
+  const label = findStyle(store().styles, styleId)?.label || styleId;
+  const isCurrent = () => store().stylePreview?.requestId === requestId;
+  const report = (
+    stage: "queued" | "done" | "error",
+    message = stylePreviewMessage(stage, label)
+  ) => store().set({ stylePreview: { message, requestId, stage, styleId } });
+
+  const model = currentCreatorModel();
+  let problem: string | null = null;
+  if (!canRenderStylePreview(styleId)) {
+    problem = "Built-in style previews cannot be regenerated";
+  } else if (!model) {
+    problem = "Wait for the Creator to load";
+  } else if (
+    styleId === CUSTOM_STYLE_ID &&
+    !model.state.character_info.custom_style?.trim()
+  ) {
+    problem = "Enter a custom style prompt before generating its preview";
+  }
+  if (problem || !model) {
+    report("error", `${stylePreviewMessage("error", label)}. ${problem}`);
+    return false;
+  }
+
+  report("queued");
+  try {
+    const image = await generateStylePreview(
+      studioHttp(),
+      stylePreviewRequest(
+        styleId,
+        model.previewPayload(),
+        STYLE_PREVIEW_NODE_ID,
+        requestId
+      )
+    );
+    if (!isCurrent()) {
+      return false;
+    }
+    store().set({
+      styles: setStyleImage(store().styles, styleId, image.image),
+    });
+    report("done", `Saved: ${label} (${image.width} × ${image.height}, WebP)`);
+    return true;
+  } catch (error) {
+    if (isCurrent()) {
+      report(
+        "error",
+        `${stylePreviewMessage("error", label)}. ${errorText(error)}`
+      );
+    }
+    return false;
+  }
+}
+
+/** Apply a `vnccs.style_preview.stage` event to the render it belongs to. */
+export function handleStylePreviewStage(detail: unknown): void {
+  const progress = store().stylePreview;
+  if (!progress || progress.stage === "done" || progress.stage === "error") {
+    return;
+  }
+  const stage = stylePreviewStage(
+    detail,
+    STYLE_PREVIEW_NODE_ID,
+    progress.requestId
+  );
+  // The HTTP reply owns the final state; it carries the saved image.
+  if (stage === "queued" || stage === "running") {
+    const label =
+      findStyle(store().styles, progress.styleId)?.label || progress.styleId;
+    store().set({
+      stylePreview: {
+        ...progress,
+        message: stylePreviewMessage(stage, label),
+        stage,
+      },
+    });
+  }
+}
+
+/** Forget a finished render's message, e.g. when the library reopens. */
+export function clearStylePreviewStatus(): void {
+  if (!stylePreviewRunning()) {
+    store().set({ stylePreview: null });
+  }
 }

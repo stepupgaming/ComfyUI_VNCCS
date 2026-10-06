@@ -16,6 +16,7 @@ import {
   updateCreatorState,
   viewCreatorState,
 } from "@workspace/vnccs/creator-state";
+import type { StylePreviewStage } from "@workspace/vnccs/style-library";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
@@ -24,6 +25,14 @@ export interface CreatorPreview {
   /** Shown instead of an image. */
   message: string;
   url: string | null;
+}
+
+/** The style library's one in-flight (or last finished) style preview render. */
+export interface StylePreviewProgress {
+  message: string;
+  requestId: string;
+  stage: StylePreviewStage;
+  styleId: string;
 }
 
 interface CreatorStoreState {
@@ -38,6 +47,7 @@ interface CreatorStoreState {
   setState: (state: CreatorState) => void;
   /** Null until the init sequence ran against the live server. */
   state: CreatorState | null;
+  stylePreview: StylePreviewProgress | null;
   styles: StyleCatalog;
   update: (
     mutate: (model: CreatorModel) => void,
@@ -86,6 +96,7 @@ export const useCreatorStore = create<CreatorStoreState>()(
       },
       previewRunning: false,
       state: null,
+      stylePreview: null,
       styles: EMPTY_STYLE_CATALOG,
       widgetData: null,
 

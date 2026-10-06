@@ -8,11 +8,13 @@ import {
 } from "@workspace/core/components/common/form-fields";
 import {
   PresetDialog,
-  StyleDialog,
-  StylePreview,
   WizardDialog,
 } from "@workspace/core/components/create/creator-dialogs";
 import { CREATOR_HELP } from "@workspace/core/components/create/creator-help";
+import {
+  StyleDialog,
+  StylePreview,
+} from "@workspace/core/components/create/style-library";
 import { useCreatorUpdate } from "@workspace/core/hooks/use-creator";
 import { useCreatorStore } from "@workspace/core/stores/creator-store";
 import { Button } from "@workspace/ui/components/button";

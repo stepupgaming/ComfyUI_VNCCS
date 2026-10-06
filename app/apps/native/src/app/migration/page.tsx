@@ -1,5 +1,5 @@
-import { PendingPage } from "@workspace/core/pages/pending-page";
+import { MigrationPage } from "@workspace/core/pages/migration-page";
 
 export default function Migration() {
-  return <PendingPage href="/migration" />;
+  return <MigrationPage />;
 }

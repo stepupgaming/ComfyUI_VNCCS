@@ -82,7 +82,7 @@ export const navigation: NavGroup[] = [
         title: "Sprites",
         href: "/sprites",
         icon: Images,
-        description: "Browse and export sprites",
+        description: "Browse sprites and clean up empty folders",
       },
       {
         title: "Migration",

@@ -12,8 +12,28 @@ from ..utils import (
     base_output_dir, character_dir, list_characters,
     load_character_info, list_costumes,
     is_absolute_path_any_os, is_path_under, normalize_filesystem_path,
-    ensure_safe_name, safe_join_under, safe_relative_path,
+    ensure_safe_name, safe_join_under, safe_relative_path, privileged_route,
 )
+
+SPRITE_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
+
+
+def _sprite_folder_name(value, field):
+    """One folder level below Sprites; existing emotion folders predate ensure_safe_name."""
+    value = str(value or "")
+    if not value.strip() or "/" in value or "\\" in value or "\0" in value or value.strip() in {".", ".."}:
+        raise ValueError(f"Invalid {field}")
+    return value
+
+
+def _folder_has_content(path):
+    """True when anything other than empty subfolders remains below path."""
+    for current, dirnames, filenames in os.walk(path):
+        if filenames:
+            return True
+        if any(os.path.islink(os.path.join(current, name)) for name in dirnames):
+            return True
+    return False
 
 # --- ComfyUI Server Imports ---
 try:
@@ -197,21 +217,30 @@ if server:
             return web.Response(status=404, text="No character specified")
 
         try:
-            sprite_dir_path = os.path.join(character_dir(character), "Sprites", costume, emotion)
+            sprite_dir_path = safe_join_under(
+                character_dir(character),
+                "Sprites",
+                _sprite_folder_name(costume, "costume"),
+                _sprite_folder_name(emotion, "emotion"),
+            )
+        except ValueError as e:
+            return web.Response(status=400, text=str(e))
+
+        try:
             if not os.path.isdir(sprite_dir_path):
                 return web.Response(status=404, text="Sprite folder not found. Run migration or generate sprites first.")
-            image_exts = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
             files = [
                 os.path.join(sprite_dir_path, filename)
                 for filename in os.listdir(sprite_dir_path)
-                if os.path.splitext(filename)[1].lower() in image_exts
+                if os.path.splitext(filename)[1].lower() in SPRITE_IMAGE_EXTS
             ]
             if not files:
                 return web.Response(status=404, text="No sprite images found")
 
             best_file = max(files, key=lambda path: (os.path.getmtime(path), path))
             img_byte_arr = io.BytesIO()
-            Image.open(best_file).save(img_byte_arr, format='PNG')
+            with Image.open(best_file) as image:
+                image.save(img_byte_arr, format='PNG')
             return web.Response(body=img_byte_arr.getvalue(), content_type='image/png')
 
         except Exception as e:
@@ -243,6 +272,7 @@ if server:
             if not os.path.exists(sprites_path):
                 return web.json_response([])
 
+            emotion = _sprite_folder_name(emotion, "emotion")
             costumes_with_emotion = []
             
             for costume in os.listdir(sprites_path):
@@ -373,10 +403,15 @@ if server:
             return web.json_response({"error": str(e)}, status=500)
 
     @server.PromptServer.instance.routes.post("/vnccs/delete_empty_folders")
+    @privileged_route
     async def delete_empty_folders(request):
         """Delete specified empty folders."""
+        import shutil
+
         try:
             data = await request.json()
+            if not isinstance(data, dict) or not isinstance(data.get("folders", []), list):
+                return web.json_response({"error": "Folders must be a list of paths"}, status=400)
             folders_to_delete = data.get("folders", [])
             character = data.get("character", "")
             
@@ -389,6 +424,7 @@ if server:
                     char_root = character_dir(ensure_safe_name(character, "character"))
                 except ValueError as e:
                     return web.json_response({"error": str(e)}, status=400)
+            root = char_root or base_root
             
             for folder_path in folders_to_delete:
                 try:
@@ -397,34 +433,32 @@ if server:
                         continue
 
                     if is_absolute_path_any_os(raw_path):
-                        resolved_path = os.path.abspath(raw_path)
-                        if not is_path_under(base_root, resolved_path):
+                        absolute = os.path.abspath(raw_path)
+                        if not is_path_under(root, absolute):
                             errors.append(f"Folder outside VNCCS output: {raw_path}")
                             continue
+                        rel_path = safe_relative_path(os.path.relpath(absolute, root), "folder")
                     else:
                         rel_path = safe_relative_path(raw_path, "folder")
-                        root = char_root or base_root
-                        resolved_path = safe_join_under(root, rel_path)
+                    resolved_path = safe_join_under(root, rel_path)
 
-                    if os.path.exists(resolved_path) and os.path.isdir(resolved_path):
-                        # Safety check: only delete if empty or contains only empty subdirs
-                        files = [f for f in os.listdir(resolved_path) 
-                                if os.path.isfile(os.path.join(resolved_path, f))]
-                        if len(files) == 0:
-                            import shutil
-                            shutil.rmtree(resolved_path)
-                            deleted.append(os.path.relpath(resolved_path, base_root))
-                            
-                            # Try to remove parent if it's now empty
-                            parent = os.path.dirname(resolved_path)
-                            if (
-                                is_path_under(base_root, parent)
-                                and os.path.exists(parent)
-                                and len(os.listdir(parent)) == 0
-                            ):
-                                os.rmdir(parent)
-                        else:
+                    if os.path.isdir(resolved_path) and not os.path.islink(resolved_path):
+                        # A nested image anywhere below keeps the folder; only empty trees go.
+                        if _folder_has_content(resolved_path):
                             errors.append(f"Folder not empty: {raw_path}")
+                            continue
+                        shutil.rmtree(resolved_path)
+                        deleted.append(os.path.relpath(resolved_path, base_root))
+
+                        # The emptied costume folder may go too, never a top-level folder like Sprites.
+                        parent = os.path.dirname(resolved_path)
+                        if (
+                            len(rel_path.split("/")) > 2
+                            and is_path_under(root, parent)
+                            and os.path.isdir(parent)
+                            and not os.listdir(parent)
+                        ):
+                            os.rmdir(parent)
                 except Exception as e:
                     errors.append(f"Failed to delete {folder_path}: {str(e)}")
             

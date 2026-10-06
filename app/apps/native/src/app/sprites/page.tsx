@@ -1,5 +1,5 @@
-import { PendingPage } from "@workspace/core/pages/pending-page";
+import { SpritesPage } from "@workspace/core/pages/sprites-page";
 
 export default function Sprites() {
-  return <PendingPage href="/sprites" />;
+  return <SpritesPage />;
 }
