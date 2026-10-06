@@ -1,0 +1,23 @@
+{
+  "name": "@workspace/vnccs",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "clean": "rimraf node_modules/.cache"
+  },
+  "dependencies": {
+    "comfy-ts": "2.17.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "@workspace/typescript-config": "workspace:*",
+    "typescript": "~7.0.2",
+    "vitest": "^5.0.3"
+  },
+  "exports": {
+    "./*": "./src/*.ts"
+  }
+}

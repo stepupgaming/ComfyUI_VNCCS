@@ -431,5 +431,6 @@ app/**/target/
 app/**/src-tauri/gen/
 app/**/next-env.d.ts
 app/**/*.tsbuildinfo
+app/**/.comfy-ts/
 # The NuGet rule above ignores every packages/ folder; the app workspace needs its own.
-!app/packages/*
+!**/app/packages/*

@@ -1,0 +1,92 @@
+name: VNCCS Studio app
+
+on:
+  push:
+    paths:
+      - "app/**"
+      - ".github/workflows/studio-app.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "app/**"
+      - ".github/workflows/studio-app.yml"
+
+defaults:
+  run:
+    working-directory: app
+
+jobs:
+  web:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: app/package.json
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint and format
+        run: pnpm check
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Unit tests
+        run: pnpm test
+
+      - name: Static export
+        run: pnpm build
+
+      # Build outputs must stay under node_modules, which the pinned scanner skips.
+      - name: Security scan after build
+        working-directory: .
+        run: python3 scripts/security_scan.py
+
+  desktop:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: app/package.json
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # tauri::generate_context! embeds the static export at compile time.
+      - name: Static export
+        run: pnpm build
+
+      - name: Rust format
+        working-directory: app/apps/native/src-tauri
+        run: cargo fmt --check
+
+      - name: Rust check
+        working-directory: app/apps/native/src-tauri
+        run: cargo check --locked

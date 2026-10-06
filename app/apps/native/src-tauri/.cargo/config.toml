@@ -1,0 +1,4 @@
+# Keeps Rust build output under node_modules, which the repository's pinned
+# security scanner skips. CARGO_TARGET_DIR still overrides this per machine.
+[build]
+target-dir = "../node_modules/.cache/tauri-target"

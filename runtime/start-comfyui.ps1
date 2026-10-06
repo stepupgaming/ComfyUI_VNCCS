@@ -1,5 +1,5 @@
 # Starts the VNCCS Studio ComfyUI runtime for one app origin.
-# Use -Origin http://localhost:3000 while running the app with `pnpm dev`.
+# Use -Origin http://localhost:1420 while running the app with `pnpm dev`.
 param(
     [string]$Root = "F:\VNCCS",
     [string]$Origin = "http://tauri.localhost",
