@@ -16,6 +16,15 @@ if (-not (Test-Path $comfy)) {
     git clone --filter=blob:none https://github.com/comfyanonymous/ComfyUI.git $comfy
 }
 git -C $comfy checkout $ComfyCommit
+# Upstream fixes newer than the pinned commit; drop each once the pin includes it.
+# qwen-image21-cache-scope.patch: comfyanonymous/ComfyUI#16667 (int8/int4 QI2 cache vs the model compiler).
+foreach ($patch in Get-ChildItem (Join-Path $PSScriptRoot "patches") -Filter *.patch) {
+    git -C $comfy apply --reverse --check $patch.FullName 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        git -C $comfy apply $patch.FullName
+        if ($LASTEXITCODE -ne 0) { throw "Could not apply $($patch.Name)" }
+    }
+}
 
 if (-not (Test-Path $python)) {
     uv venv (Join-Path $comfy ".venv") --python 3.12
