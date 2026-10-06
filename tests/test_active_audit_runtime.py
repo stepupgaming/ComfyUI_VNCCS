@@ -165,6 +165,24 @@ def test_privileged_handlers_reject_before_parsing_body(handler, responses):
     assert result.status == 403
 
 
+@pytest.mark.parametrize("origin, expected_status", [
+    ("http://tauri.localhost", 200),
+    ("http://evil.test", 403),
+])
+def test_seedvr_download_trusts_only_the_cors_origin_without_marker(origin, expected_status, responses, monkeypatch):
+    monkeypatch.setattr(utils, "cors_trusted_origin", lambda: "http://tauri.localhost")
+    monkeypatch.setattr(generator, "_SEEDVR_DOWNLOAD_STATUS", {})
+    started = []
+    monkeypatch.setattr(generator.threading, "Thread",
+                        lambda target, args, daemon: SimpleNamespace(start=lambda: started.append(args)))
+    async def body():
+        return {"category": "vae", "name": "ema_vae_fp16.safetensors"}
+    request = SimpleNamespace(headers={"Host": "127.0.0.1:8188", "Origin": origin, "Sec-Fetch-Site": "cross-site"}, json=body)
+    result = asyncio.run(generator.vnccs_character_generator_seedvr_download(request))
+    assert result.status == expected_status
+    assert started == ([("vae", "ema_vae_fp16.safetensors")] if expected_status == 200 else [])
+
+
 @pytest.mark.parametrize("group", utils.MAIN_DIRS)
 def test_costume_save_rejects_redirected_storage_before_any_write(tmp_path, monkeypatch, responses, group):
     root, outside = tmp_path / "characters", tmp_path / "outside"

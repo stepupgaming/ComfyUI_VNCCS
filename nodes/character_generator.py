@@ -69,6 +69,7 @@ from ..utils import (
     character_dir,
     ensure_safe_name,
     is_path_under,
+    is_trusted_cors_request,
     load_character_info,
     normalize_filesystem_path,
     safe_join_under,
@@ -5040,7 +5041,7 @@ if server is not None:
     @server.PromptServer.instance.routes.post("/vnccs/character_generator/seedvr_download")
     @privileged_route
     async def vnccs_character_generator_seedvr_download(request):
-        if request.headers.get("X-VNCCS-CSRF") != "1":
+        if request.headers.get("X-VNCCS-CSRF") != "1" and not is_trusted_cors_request(request):
             return web.json_response({"error": "Missing VNCCS request token"}, status=403)
         try:
             data = await request.json()

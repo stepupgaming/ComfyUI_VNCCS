@@ -324,13 +324,20 @@ def cors_trusted_origin() -> Optional[str]:
     return origin
 
 
-def validate_privileged_request(request) -> None:
-    """Validate state-changing VNCCS API calls from the same ComfyUI origin."""
+def is_trusted_cors_request(request) -> bool:
+    """True when the request comes from the app origin ComfyUI was started for.
+
+    ComfyUI's CORS preflight only allows Content-Type and Authorization, so a
+    separate app origin cannot send the CSRF marker. Browsers cannot forge Origin.
+    """
     trusted_origin = cors_trusted_origin()
     request_origin = (request.headers.get("Origin") or "").strip().rstrip("/").lower()
-    # ComfyUI's CORS preflight only allows Content-Type and Authorization, so a
-    # separate app origin cannot send the CSRF marker. Browsers cannot forge Origin.
-    if trusted_origin and request_origin == trusted_origin:
+    return bool(trusted_origin) and request_origin == trusted_origin
+
+
+def validate_privileged_request(request) -> None:
+    """Validate state-changing VNCCS API calls from the same ComfyUI origin."""
+    if is_trusted_cors_request(request):
         return
 
     host = (request.headers.get("Host") or "").lower()
