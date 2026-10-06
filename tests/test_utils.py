@@ -362,6 +362,38 @@ class TestPathHelpers:
         with pytest.raises(ValueError):
             U.validate_privileged_request(request)
 
+    def test_privileged_request_accepts_cors_origin(self, monkeypatch):
+        monkeypatch.setattr(U, "cors_trusted_origin", lambda: "http://tauri.localhost")
+        request = types.SimpleNamespace(headers={
+            "Host": "127.0.0.1:8188",
+            "Origin": "http://tauri.localhost",
+            "Sec-Fetch-Site": "cross-site",
+        })
+        U.validate_privileged_request(request)
+
+    def test_privileged_request_rejects_other_origin_when_cors_origin_set(self, monkeypatch):
+        monkeypatch.setattr(U, "cors_trusted_origin", lambda: "http://tauri.localhost")
+        request = types.SimpleNamespace(headers={
+            "Host": "127.0.0.1:8188",
+            "Origin": "http://evil.test",
+            "Sec-Fetch-Site": "cross-site",
+            "X-VNCCS-CSRF": "1",
+        })
+        with pytest.raises(ValueError):
+            U.validate_privileged_request(request)
+
+    @pytest.mark.parametrize("configured, expected", [
+        (None, None),
+        ("", None),
+        ("*", None),
+        ("http://Tauri.localhost/", "http://tauri.localhost"),
+    ])
+    def test_cors_trusted_origin_ignores_wildcard(self, monkeypatch, configured, expected):
+        cli_args = types.ModuleType("comfy.cli_args")
+        cli_args.args = types.SimpleNamespace(enable_cors_header=configured)
+        monkeypatch.setitem(sys.modules, "comfy.cli_args", cli_args)
+        assert U.cors_trusted_origin() == expected
+
     def test_privileged_request_rejects_cross_site_even_with_header(self):
         request = types.SimpleNamespace(headers={
             "Host": "127.0.0.1:8188",

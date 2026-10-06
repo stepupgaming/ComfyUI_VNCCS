@@ -311,8 +311,28 @@ def safe_relative_path(value: str, field: str = "path") -> str:
     return "/".join(parts)
 
 
+def cors_trusted_origin() -> Optional[str]:
+    """Return the exact origin ComfyUI was started to serve with --enable-cors-header."""
+    try:
+        from comfy.cli_args import args
+    except ImportError:
+        return None
+    origin = (getattr(args, "enable_cors_header", None) or "").strip().rstrip("/").lower()
+    # A wildcard opens ComfyUI to every site; it must never bypass the CSRF guard.
+    if not origin or origin == "*":
+        return None
+    return origin
+
+
 def validate_privileged_request(request) -> None:
     """Validate state-changing VNCCS API calls from the same ComfyUI origin."""
+    trusted_origin = cors_trusted_origin()
+    request_origin = (request.headers.get("Origin") or "").strip().rstrip("/").lower()
+    # ComfyUI's CORS preflight only allows Content-Type and Authorization, so a
+    # separate app origin cannot send the CSRF marker. Browsers cannot forge Origin.
+    if trusted_origin and request_origin == trusted_origin:
+        return
+
     host = (request.headers.get("Host") or "").lower()
     sec_fetch_site = (request.headers.get("Sec-Fetch-Site") or "").lower()
     has_marker = request.headers.get(PRIVILEGED_REQUEST_HEADER) == PRIVILEGED_REQUEST_VALUE

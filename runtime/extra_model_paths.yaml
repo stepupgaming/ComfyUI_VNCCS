@@ -1,0 +1,19 @@
+# VNCCS Studio runtime model paths. Weights are referenced in place, never copied.
+# Files the Control Center downloads land in the runtime's own models/ folder.
+
+qwen_image_21:
+    base_path: G:/Models/qwen-image-2.1/
+    diffusion_models: diffusion_models/
+    text_encoders: text_encoders/
+    vae: vae/
+
+minimax_h3_comfy:
+    base_path: G:/Models/MiniMax-H3-Comfy/
+    diffusion_models: diffusion_models/
+
+# Only the text encoder, VAEs and LoRAs: this folder's diffusion models are FL2VA, not Ref2VA.
+minimax_h3_local:
+    base_path: C:/Projects/minimax-h3/checkpoints/
+    text_encoders: text_encoders/
+    vae: vae/
+    loras: loras/

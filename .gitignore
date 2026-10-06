@@ -421,3 +421,15 @@ FodyWeavers.xsd
 *.msp
 *.DS_Store
 node.zip
+
+# VNCCS Studio app build outputs (also keeps them out of the security scan)
+app/**/.next/
+app/**/out/
+app/**/dist/
+app/**/.turbo/
+app/**/target/
+app/**/src-tauri/gen/
+app/**/next-env.d.ts
+app/**/*.tsbuildinfo
+# The NuGet rule above ignores every packages/ folder; the app workspace needs its own.
+!app/packages/*

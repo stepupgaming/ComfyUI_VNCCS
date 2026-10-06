@@ -2,3 +2,6 @@
 # the Comfy Registry runtime archive.
 tests/
 scripts/
+# VNCCS Studio desktop app and its local ComfyUI runtime scripts.
+app/
+runtime/
