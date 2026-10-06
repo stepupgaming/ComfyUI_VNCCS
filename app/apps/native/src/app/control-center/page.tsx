@@ -1,5 +1,5 @@
-import { PendingPage } from "@workspace/core/pages/pending-page";
+import { ControlCenterPage } from "@workspace/core/pages/control-center-page";
 
 export default function ControlCenter() {
-  return <PendingPage href="/control-center" />;
+  return <ControlCenterPage />;
 }

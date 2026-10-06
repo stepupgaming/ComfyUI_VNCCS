@@ -32,6 +32,14 @@ start it by hand:
 runtime\start-comfyui.ps1 -Origin http://localhost:1420
 ```
 
+## Model downloads
+
+The Control Center page downloads catalog LoRAs and helper files into the
+runtime's `models/` folder. It never downloads Qwen Image 2.1, MiniMax H3 or
+Flux base weights (diffusion models, text encoders, VAEs), nor Klein9b LoRAs:
+`packages/vnccs/src/download-guard.ts` refuses them before any request is sent.
+Point the runtime at existing copies with `extra_model_paths.yaml` instead.
+
 ## Commands
 
 Run from `app/` with pnpm 10:
