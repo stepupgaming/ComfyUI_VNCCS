@@ -63,9 +63,18 @@ const DEFAULT_DATA = parseGeneratorData(null);
 export interface GeneratorSources {
   character?: string;
   emotionMode?: string;
+  /** The Emotion Studio's costume x emotion pairs, in queue order. */
+  emotionPairs?: { costume: string; emotion: string }[];
   nodeState?: NodeState;
   nsfw?: unknown;
 }
+
+/**
+ * Emotions generators created in this session that still take the QI2 bbox
+ * defaults the first time they follow a QI2 Emotion Studio. Restored data
+ * keeps its saved values, like a loaded workflow in the widget.
+ */
+const qi2EmotionDefaultsPending = new Set<string>();
 
 function store() {
   return useGeneratorStore.getState();
@@ -98,6 +107,9 @@ export function ensureGenerator(target: GeneratorTarget): void {
   const key = targetKey(target);
   if (!store().data[key]) {
     store().setData(key, structuredClone(DEFAULT_DATA));
+    if (target.kind === "emotions") {
+      qi2EmotionDefaultsPending.add(key);
+    }
   }
   if (!store().views[key]) {
     const data = generatorData(target);
@@ -134,8 +146,17 @@ export function syncGenerator(
   target: GeneratorTarget,
   sources: GeneratorSources
 ): GeneratorData {
+  const key = targetKey(target);
+  const seedQi2Defaults =
+    sources.emotionMode === "qi2" && qi2EmotionDefaultsPending.has(key);
+  if (seedQi2Defaults) {
+    qi2EmotionDefaultsPending.delete(key);
+  }
   const current = generatorData(target);
   const next = updateGeneratorData(current, target.kind, (model) => {
+    if (seedQi2Defaults) {
+      model.applyQi2EmotionDefaults();
+    }
     model.syncCharacterSource(sources);
     model.syncModelResolution(sources);
   });

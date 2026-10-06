@@ -48,7 +48,9 @@ export function useGenerator(
   const online = useConnectionStore((state) => state.status === "online");
   const data = useGeneratorStore((state) => state.data[key]);
   const view = useGeneratorStore((state) => state.views[key]);
-  const { character, emotionMode, nodeState, nsfw } = sources;
+  const { character, emotionMode, emotionPairs, nodeState, nsfw } = sources;
+  // Pairs are rebuilt on every studio change; follow them by value.
+  const pairsKey = emotionPairs ? JSON.stringify(emotionPairs) : "";
 
   useEffect(() => ensureGenerator(target), [target]);
 
@@ -59,8 +61,14 @@ export function useGenerator(
   }, [online, target]);
 
   useEffect(() => {
-    syncGenerator(target, { character, emotionMode, nodeState, nsfw });
-  }, [target, character, emotionMode, nodeState, nsfw]);
+    syncGenerator(target, {
+      character,
+      emotionMode,
+      emotionPairs: pairsKey ? JSON.parse(pairsKey) : undefined,
+      nodeState,
+      nsfw,
+    });
+  }, [target, character, emotionMode, pairsKey, nodeState, nsfw]);
 
   return useMemo(
     () =>

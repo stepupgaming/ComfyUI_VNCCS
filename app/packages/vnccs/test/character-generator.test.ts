@@ -302,6 +302,34 @@ describe("Character Generator emotion settings", () => {
     ]);
     expect(model.defaultPreviewStage()).toBe("emotion_0001_bg_remove");
   });
+
+  it("follows the Emotion Studio's character and pairs", () => {
+    let data = parseGeneratorData({ character_name: "Old" });
+    const sync = (
+      source: Parameters<GeneratorModel["syncCharacterSource"]>[0]
+    ) => {
+      let changed = false;
+      data = updateGeneratorData(data, "emotions", (model) => {
+        changed = model.syncCharacterSource(source);
+      });
+      return changed;
+    };
+    const pairs = [
+      { costume: "Naked", emotion: "angry" },
+      { costume: "Naked", emotion: "happy" },
+      { costume: "Simple", emotion: "angry" },
+    ];
+    expect(sync({ character: "StudioQA", emotionPairs: pairs })).toBe(true);
+    expect(data.character_name).toBe("StudioQA");
+    expect(data.emotion_pairs).toEqual(pairs);
+    expect(
+      new GeneratorModel(data, "emotions").stages().map((stage) => stage.label)
+    ).toEqual(["Naked / angry", "Naked / happy", "Simple / angry"]);
+    expect(sync({ character: "StudioQA", emotionPairs: pairs })).toBe(false);
+    expect(sync({ character: "", emotionPairs: [] })).toBe(true);
+    expect(data.character_name).toBe("");
+    expect(data.emotion_pairs).toEqual([]);
+  });
 });
 
 describe("Character Generator resolution per model", () => {

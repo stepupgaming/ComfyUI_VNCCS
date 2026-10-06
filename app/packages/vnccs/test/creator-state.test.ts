@@ -416,6 +416,50 @@ describe("Creator prompts", () => {
   });
 });
 
+describe("Creator default mode", () => {
+  it("opens a new Creator on QI2 when no checkpoint is installed", () => {
+    const ctx = context();
+    const { isNew, state } = parseCreatorState(null, ctx.defaultStyle);
+    expect(isNew).toBe(true);
+    const opened = initializeCreatorState(state, ctx, isNew);
+    const switched = save(initializeCreatorState(state, ctx), (model) =>
+      model.setGenerationMode("qi2")
+    );
+    expect(opened.gen_settings.generation_mode).toBe("qi2");
+    expect(opened.character_info.background_color).toBe("Transparent");
+    expect(opened).toEqual(switched);
+  });
+
+  it("keeps Illustrious for a new Creator when a checkpoint is installed", () => {
+    const ctx = context({
+      local: {
+        ...NO_LOCAL_ASSETS,
+        checkpoints: ["Illustrious/ILFlat.safetensors"],
+      },
+    });
+    const { isNew, state } = parseCreatorState(null, ctx.defaultStyle);
+    const opened = initializeCreatorState(state, ctx, isNew);
+    expect(opened.gen_settings.generation_mode).toBe("illustrious");
+    expect(opened.gen_settings.ckpt_name).toBe(
+      "Illustrious/ILFlat.safetensors"
+    );
+  });
+
+  it("keeps a saved Illustrious selection without checkpoints", () => {
+    const loaded = parseCreatorState(
+      JSON.stringify({ gen_settings: gen("illustrious") }),
+      "legacy"
+    );
+    expect(loaded.isNew).toBe(false);
+    const opened = initializeCreatorState(
+      loaded.state,
+      context(),
+      loaded.isNew
+    );
+    expect(opened.gen_settings.generation_mode).toBe("illustrious");
+  });
+});
+
 describe("Creator character data", () => {
   it("restores character_info only for the character that owns it", () => {
     const foreign = parseCreatorState(

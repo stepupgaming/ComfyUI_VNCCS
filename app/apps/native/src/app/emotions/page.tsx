@@ -1,5 +1,5 @@
-import { PendingPage } from "@workspace/core/pages/pending-page";
+import { EmotionsPage } from "@workspace/core/pages/emotions-page";
 
 export default function Emotions() {
-  return <PendingPage href="/emotions" />;
+  return <EmotionsPage />;
 }

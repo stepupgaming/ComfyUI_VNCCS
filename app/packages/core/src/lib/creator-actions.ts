@@ -5,6 +5,7 @@ import {
   prepareGeneratorRun,
   syncGenerator,
 } from "@workspace/core/lib/generator-actions";
+import { prefetchImage, probeImage } from "@workspace/core/lib/images";
 import { runPrompt } from "@workspace/core/lib/jobs";
 import { studioHttp } from "@workspace/core/lib/studio";
 import { useControlCenterStore } from "@workspace/core/stores/control-center-store";
@@ -79,21 +80,6 @@ function store() {
 
 function currentCharacter(): string {
   return store().state?.character ?? "";
-}
-
-/** Resolves once the browser loaded the image, or failed to. */
-function probeImage(url: string): Promise<boolean> {
-  return new Promise((resolve) => {
-    const image = new Image();
-    image.onload = () => resolve(true);
-    image.onerror = () => resolve(false);
-    image.src = url;
-  });
-}
-
-function prefetch(url: string) {
-  const image = new Image();
-  image.src = url;
 }
 
 function hideSpriteNav() {
@@ -172,7 +158,7 @@ export async function showSpritePreview(
   );
   if (count > 1) {
     for (const neighbour of [normalized - 1, normalized + 1]) {
-      prefetch(
+      prefetchImage(
         posePreviewUrl(
           http,
           character,
@@ -281,11 +267,11 @@ export async function initCreator(): Promise<void> {
       fetchPresetCatalog(http).catch(() => null),
     ]);
     store().set({ lists, loadError: null, presets, styles });
-    const { state, restoredInfoCharacter } = parseCreatorState(
+    const { isNew, state, restoredInfoCharacter } = parseCreatorState(
       store().widgetData,
       defaultStyleId(styles)
     );
-    store().setState(initializeCreatorState(state, creatorContext()));
+    store().setState(initializeCreatorState(state, creatorContext(), isNew));
     const characters = lists.characters;
     const saved = store().state?.character ?? "";
     const selected = characters.includes(saved) ? saved : characters[0] || "";

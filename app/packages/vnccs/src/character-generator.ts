@@ -791,7 +791,18 @@ export class GeneratorModel {
     };
   }
 
-  syncCharacterSource(source: { character?: string; nsfw?: unknown }): boolean {
+  syncCharacterSource(source: {
+    character?: string;
+    /** Set when an Emotion Studio feeds this generator. */
+    emotionPairs?: { costume?: string; emotion?: string }[];
+    nsfw?: unknown;
+  }): boolean {
+    if (this.isEmotions && source.emotionPairs !== undefined) {
+      return this.syncEmotionStudioSource(
+        source.character ?? "",
+        source.emotionPairs
+      );
+    }
     let changed = false;
     if (source.character && this.data.character_name !== source.character) {
       this.data.character_name = source.character;
@@ -803,6 +814,26 @@ export class GeneratorModel {
         this.data.nsfw_enabled = next;
         changed = true;
       }
+    }
+    return changed;
+  }
+
+  /** `syncEmotionStudioSourceData`: the studio's character and its costume x emotion pairs. */
+  private syncEmotionStudioSource(
+    character: string,
+    pairs: { costume?: string; emotion?: string }[]
+  ): boolean {
+    let changed = false;
+    if (this.data.character_name !== character) {
+      this.data.character_name = character;
+      changed = true;
+    }
+    const next = pairs.map(({ costume, emotion }) => ({ costume, emotion }));
+    if (
+      JSON.stringify(this.data.emotion_pairs ?? []) !== JSON.stringify(next)
+    ) {
+      this.data.emotion_pairs = next;
+      changed = true;
     }
     return changed;
   }

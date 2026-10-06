@@ -1,5 +1,5 @@
-import { PendingPage } from "@workspace/core/pages/pending-page";
+import { ClonePage } from "@workspace/core/pages/clone-page";
 
 export default function Clone() {
-  return <PendingPage href="/clone" />;
+  return <ClonePage />;
 }

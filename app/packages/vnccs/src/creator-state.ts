@@ -1395,6 +1395,8 @@ export function serializeCreatorState(state: CreatorState): string {
 }
 
 export interface LoadedCreatorState {
+  /** True when nothing was saved: the defaults of a new Creator. */
+  isNew: boolean;
   /** Set when the saved character_info was verified to belong to `character`. */
   restoredInfoCharacter: string | null;
   state: CreatorState;
@@ -1455,7 +1457,7 @@ export function parseCreatorState(
   const state = defaultCreatorState(defaultStyle);
   const parsed = parseSavedRecord(raw);
   if (!parsed) {
-    return { state, restoredInfoCharacter: null };
+    return { isNew: true, state, restoredInfoCharacter: null };
   }
   if (parsed.character) {
     state.character = String(parsed.character);
@@ -1481,16 +1483,19 @@ export function parseCreatorState(
       (state as Record<string, unknown>)[key] = parsed[key];
     }
   }
-  return { state, restoredInfoCharacter };
+  return { isNew: false, state, restoredInfoCharacter };
 }
 
 /**
  * The init sequence after `/vnccs/context_lists` loads: migrate the profiles,
  * fill per-family defaults from the local model lists and migrate prompts.
+ * A new Creator opens on Illustrious like the widget, or on QI2 when no
+ * checkpoint is installed for Illustrious to use.
  */
 export function initializeCreatorState(
   state: CreatorState,
-  context: CreatorContext
+  context: CreatorContext,
+  isNew = false
 ): CreatorState {
   const model = new CreatorModel(structuredClone(state), context);
   model.migrateGenerationModeSettings();
@@ -1509,6 +1514,10 @@ export function initializeCreatorState(
   model.migratePromptModes();
   model.saveCurrentGenerationModeValues();
   model.syncCatalogDefaults();
+  if (isNew && context.local.checkpoints.length === 0) {
+    model.setGenerationMode("qi2");
+    model.syncCatalogDefaults();
+  }
   model.normalizeInfoFields();
   // The preview is reloaded next and marks itself valid once it shows.
   model.finalize(false);

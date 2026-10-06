@@ -49,11 +49,19 @@ export async function fetchCharacterInfo(
 
 export const CHARACTER_NAME_PATTERN = /^[A-Za-z0-9 _-]{1,120}$/;
 
-export function createCharacter(http: VnccsHttp, name: string) {
-  return http.post<{ status?: string }>("/vnccs/create", {
-    name,
-    catalog: "creator_v2",
-  });
+/**
+ * Creator V2 seeds new characters from its own catalog; the Cloner sends no
+ * catalog, so the server applies the legacy defaults.
+ */
+export function createCharacter(
+  http: VnccsHttp,
+  name: string,
+  catalog: string | null = "creator_v2"
+) {
+  return http.post<{ status?: string }>(
+    "/vnccs/create",
+    catalog ? { name, catalog } : { name }
+  );
 }
 
 export function deleteCharacter(http: VnccsHttp, name: string) {
@@ -63,12 +71,13 @@ export function deleteCharacter(http: VnccsHttp, name: string) {
 /** Number of saved pose sprites the preview can step through; 0 when the route fails. */
 export async function fetchPosePreviewCount(
   http: VnccsHttp,
-  character: string
+  character: string,
+  costume = ""
 ): Promise<number> {
   try {
     const meta = await http.get<{ count?: number }>(
       "/vnccs/get_character_pose_preview_meta",
-      { character, t: Date.now() }
+      { character, t: Date.now(), costume: costume || undefined }
     );
     return Number(meta.count || 0);
   } catch {
@@ -80,16 +89,19 @@ export function cachedPreviewUrl(http: VnccsHttp, character: string): string {
   return http.url("/vnccs/get_cached_preview", { character, t: Date.now() });
 }
 
+/** One saved pose sprite; without a costume the server picks Naked, then Original. */
 export function posePreviewUrl(
   http: VnccsHttp,
   character: string,
   index: number,
-  cacheBust: string
+  cacheBust: string,
+  costume = ""
 ): string {
   return http.url("/vnccs/get_character_pose_preview", {
     character,
     index,
     v: cacheBust || "current",
+    costume: costume || undefined,
   });
 }
 
@@ -125,18 +137,35 @@ export interface WizardModelStatus {
   ready: boolean;
 }
 
-/** The wizard only needs the text model, not the vision projector. */
-export function fetchWizardModelStatus(
-  http: VnccsHttp
-): Promise<WizardModelStatus> {
-  return http.get<WizardModelStatus>("/vnccs/qwen_vl_model_status", {
-    vision: "false",
-  });
+export interface WizardModelOptions {
+  /**
+   * Image analysis (the Cloner) also needs the vision projector; the text
+   * wizards (Creator, Clothes) only need the language model.
+   */
+  vision?: boolean;
 }
 
-export async function startWizardModelDownload(http: VnccsHttp): Promise<void> {
+function visionQuery({ vision = false }: WizardModelOptions) {
+  return vision ? undefined : { vision: "false" };
+}
+
+export function fetchWizardModelStatus(
+  http: VnccsHttp,
+  options: WizardModelOptions = {}
+): Promise<WizardModelStatus> {
+  return http.get<WizardModelStatus>(
+    "/vnccs/qwen_vl_model_status",
+    visionQuery(options)
+  );
+}
+
+/** Starts a Hugging Face download of the Qwen3.5 model files. */
+export async function startWizardModelDownload(
+  http: VnccsHttp,
+  options: WizardModelOptions = {}
+): Promise<void> {
   try {
-    await http.post("/vnccs/qwen_vl_download_model", {}, { vision: "false" });
+    await http.post("/vnccs/qwen_vl_download_model", {}, visionQuery(options));
   } catch (error) {
     // 409: a download is already running; keep polling it.
     if (!(error instanceof VnccsRequestError && error.status === 409)) {
@@ -170,6 +199,50 @@ export interface WizardFields {
   skin_color?: string;
 }
 
+/** Error codes the Qwen3.5 routes answer with when the model cannot run. */
+export const MODEL_FILE_ERRORS = [
+  "MODEL_MISSING",
+  "MODEL_INVALID",
+  "MMPROJ_MISSING",
+  "MMPROJ_INVALID",
+  "MODEL_DOWNLOAD_FAILED",
+] as const;
+
+export interface WizardFailure {
+  /** `DEPENDENCY_MISSING`, one of {@link MODEL_FILE_ERRORS}, or another server code. */
+  code: string;
+  message: string;
+  /** The model file the server looked for. */
+  model: string;
+  /** Raw model output, for parse failures. */
+  raw: string;
+}
+
+/** The `{error, message, raw}` body of a failed wizard or analysis call; null for other errors. */
+export function wizardFailure(error: unknown): WizardFailure | null {
+  const data = error instanceof VnccsRequestError ? error.data : null;
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    return null;
+  }
+  const record = data as Record<string, unknown>;
+  const text = (value: unknown) => (typeof value === "string" ? value : "");
+  const code = text(record.error);
+  const message = text(record.message);
+  if (!(code || message)) {
+    return null;
+  }
+  return {
+    code,
+    message: message || code,
+    model: text(record.model_name),
+    raw: text(record.raw),
+  };
+}
+
+export function isModelFileError(code: string): boolean {
+  return (MODEL_FILE_ERRORS as readonly string[]).includes(code);
+}
+
 /** Expand a broad description into Creator fields with the local Qwen3.5 model. */
 export async function runCharacterWizard(
   http: VnccsHttp,
@@ -183,12 +256,9 @@ export async function runCharacterWizard(
     });
   } catch (error) {
     // Failures carry an error code plus a readable message.
-    const data = error instanceof VnccsRequestError ? error.data : null;
-    if (data && typeof data === "object" && "message" in data) {
-      const { message } = data as { message?: unknown };
-      if (typeof message === "string" && message) {
-        throw new Error(message);
-      }
+    const failure = wizardFailure(error);
+    if (failure) {
+      throw new Error(failure.message);
     }
     throw error;
   }
