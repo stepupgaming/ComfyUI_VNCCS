@@ -1,6 +1,10 @@
 "use client";
 
 import {
+  NumberField,
+  SelectField,
+} from "@workspace/core/components/common/form-fields";
+import {
   CcBlock,
   EmptyEntries,
 } from "@workspace/core/components/control-center/cc-block";
@@ -13,7 +17,6 @@ import {
 } from "@workspace/core/components/control-center/entry-status";
 import { useSamplerLists } from "@workspace/core/hooks/use-control-center";
 import { useControlCenterStore } from "@workspace/core/stores/control-center-store";
-import { Input } from "@workspace/ui/components/input";
 import { Label } from "@workspace/ui/components/label";
 import {
   Select,
@@ -37,7 +40,7 @@ import {
   statusLabel,
   variantPrefixLength,
 } from "@workspace/vnccs/control-center-state";
-import { useEffect, useId, useState } from "react";
+import { useId } from "react";
 
 function useUpdate() {
   return useControlCenterStore((state) => state.update);
@@ -165,94 +168,6 @@ function PassThroughNotice({ model }: { model: ControlCenterModel }) {
       Pass-through mode takes {inputs} from the node&apos;s inputs inside a
       ComfyUI workflow. VNCCS Studio builds its own workflows and cannot wire
       those inputs, so choose UNET to generate here.
-    </div>
-  );
-}
-
-function NumberField({
-  help,
-  label,
-  max,
-  min,
-  onCommit,
-  step,
-  value,
-}: {
-  help: string;
-  label: string;
-  max: number;
-  min: number;
-  onCommit: (value: number) => void;
-  step: number;
-  value: number;
-}) {
-  const id = useId();
-  const [draft, setDraft] = useState(String(value));
-  useEffect(() => setDraft(String(value)), [value]);
-
-  // Commits on blur or Enter, like the widget's native change event.
-  const commit = () => {
-    const parsed = Number.parseFloat(draft);
-    if (Number.isFinite(parsed) && parsed !== value) {
-      onCommit(parsed);
-    } else {
-      setDraft(String(value));
-    }
-  };
-
-  return (
-    <div className="flex flex-col gap-1.5" title={help}>
-      <Label htmlFor={id}>{label}</Label>
-      <Input
-        id={id}
-        max={max}
-        min={min}
-        onBlur={commit}
-        onChange={(event) => setDraft(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Enter") {
-            commit();
-          }
-        }}
-        step={step}
-        type="number"
-        value={draft}
-      />
-    </div>
-  );
-}
-
-function SelectField({
-  help,
-  label,
-  onChange,
-  options,
-  value,
-}: {
-  help?: string;
-  label: string;
-  onChange: (value: string) => void;
-  options: readonly string[];
-  value: string;
-}) {
-  const id = useId();
-  // Imported workflows may name a sampler this ComfyUI does not list.
-  const choices = options.includes(value) ? options : [value, ...options];
-  return (
-    <div className="flex flex-col gap-1.5" title={help}>
-      <Label htmlFor={id}>{label}</Label>
-      <Select onValueChange={onChange} value={value}>
-        <SelectTrigger className="w-full" id={id}>
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {choices.map((option) => (
-            <SelectItem key={option} value={option}>
-              {option}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
     </div>
   );
 }

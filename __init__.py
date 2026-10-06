@@ -53,7 +53,9 @@ def _vnccs_register_endpoint():  # lazy registration to avoid import errors in a
 
     if getattr(PromptServer.instance, "app", None) is not None:
         from .nodes.http_state import install_cache_policy
+        from .nodes.studio_host import register_studio_host_routes
         install_cache_policy(PromptServer.instance)
+        register_studio_host_routes(PromptServer.instance.routes)
 
     @PromptServer.instance.routes.get("/vnccs/config")
     async def vnccs_get_config(request):

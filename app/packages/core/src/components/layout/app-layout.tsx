@@ -3,6 +3,7 @@
 import { AppHeader } from "@workspace/core/components/layout/app-header";
 import { AppSidebar } from "@workspace/core/components/layout/app-sidebar";
 import { StatusBar } from "@workspace/core/components/layout/status-bar";
+import { PoseStudioHost } from "@workspace/core/components/pose-studio/pose-studio-host";
 import type { LinkComponent } from "@workspace/core/config/navigation";
 import { useConnectionMonitor } from "@workspace/core/hooks/use-connection-monitor";
 import { useCatalog } from "@workspace/core/hooks/use-control-center";
@@ -52,6 +53,7 @@ export function AppLayout({
             <StatusBar />
           </SidebarInset>
         </SidebarProvider>
+        <PoseStudioHost />
         <Toaster position="bottom-right" richColors={true} />
       </TooltipProvider>
     </ThemeProvider>

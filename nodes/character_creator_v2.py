@@ -660,8 +660,25 @@ def normalize_overhaul_strength(value):
     return math.floor(max(0.0, min(1.0, strength)) * 4 + 0.5) / 4
 
 
+# The catalogue publishes the adapter under versioned names (V1, V1.2, ...).
+QI2_OVERHAUL_FILE_RE = re.compile(r"^vnccs_qi2_animeoverhaulv(\d+(?:\.\d+)*)\.safetensors$")
+
+
+def _overhaul_version(name):
+    match = QI2_OVERHAUL_FILE_RE.match(str(name or "").replace("\\", "/").rsplit("/", 1)[-1].lower())
+    return tuple(int(part) for part in match.group(1).split(".")) if match else None
+
+
 def is_creator_overhaul_lora(name):
-    return str(name or "").replace("\\", "/").rsplit("/", 1)[-1].lower() == QI2_OVERHAUL_LORA_NAME.rsplit("/", 1)[-1].lower()
+    return _overhaul_version(name) is not None
+
+
+def resolve_creator_overhaul_lora():
+    """The installed adapter: the pinned name, else the newest installed version."""
+    if get_lora_full_path(QI2_OVERHAUL_LORA_NAME):
+        return QI2_OVERHAUL_LORA_NAME
+    installed = [name for name in safe_filename_list("loras") if is_creator_overhaul_lora(name)]
+    return max(installed, key=_overhaul_version) if installed else None
 
 
 def apply_creator_overhaul(model, clip, gen_settings, apply_lora):
@@ -671,12 +688,13 @@ def apply_creator_overhaul(model, clip, gen_settings, apply_lora):
     strength = normalize_overhaul_strength(gen_settings.get("qi2_overhaul_strength", 0.5))
     if strength == 0:
         return model, clip
-    if not get_lora_full_path(QI2_OVERHAUL_LORA_NAME):
+    lora_name = resolve_creator_overhaul_lora()
+    if not lora_name:
         raise ValueError(
             "Qwen Image2.1 Character Overhaul is not installed. Download its card "
             "in Character Creator V2 or set its strength to 0."
         )
-    return apply_lora(model, clip, QI2_OVERHAUL_LORA_NAME, strength, 0.0)
+    return apply_lora(model, clip, lora_name, strength, 0.0)
 
 
 def normalize_gen_settings(gen_settings):

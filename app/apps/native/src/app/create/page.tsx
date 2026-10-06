@@ -1,5 +1,5 @@
-import { PendingPage } from "@workspace/core/pages/pending-page";
+import { CreatePage } from "@workspace/core/pages/create-page";
 
 export default function Create() {
-  return <PendingPage href="/create" />;
+  return <CreatePage />;
 }

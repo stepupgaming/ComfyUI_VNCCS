@@ -99,11 +99,14 @@ export function DownloadBar({ view }: { view: EntryView }) {
 export function EntryAction({
   category,
   entry,
+  onDownload,
   size = "sm",
   view,
 }: {
   category: DownloadCategory;
   entry: CatalogEntry;
+  /** Replaces the single-entry download, e.g. to fetch a model's CLIP and VAE with it. */
+  onDownload?: () => void;
   size?: "xs" | "sm";
   view: EntryView;
 }) {
@@ -136,7 +139,11 @@ export function EntryAction({
     <Button
       onClick={(event) => {
         event.stopPropagation();
-        download(category, entry);
+        if (onDownload) {
+          onDownload();
+        } else {
+          download(category, entry);
+        }
       }}
       size={size}
       variant="outline"

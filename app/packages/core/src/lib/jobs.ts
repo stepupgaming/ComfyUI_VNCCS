@@ -1,20 +1,11 @@
 import { studioHost } from "@workspace/core/lib/studio";
 import { useJobStore } from "@workspace/core/stores/job-store";
 import type { ApiPrompt } from "@workspace/vnccs/prompt";
-import { type ComfyExecution, startPrompt } from "@workspace/vnccs/runner";
-
-function failureMessage(execution: ComfyExecution): string {
-  const error = execution.data.error as
-    | { exception_message?: string; node_type?: string }
-    | null
-    | undefined;
-  if (error?.exception_message) {
-    return error.node_type
-      ? `${error.node_type}: ${error.exception_message}`
-      : error.exception_message;
-  }
-  return "The run failed";
-}
+import {
+  type ComfyExecution,
+  executionFailureMessage,
+  startPrompt,
+} from "@workspace/vnccs/runner";
 
 /** Queue a prompt and mirror its progress and previews into the status bar. */
 export async function runPrompt(
@@ -30,7 +21,7 @@ export async function runPrompt(
     });
     await execution.done;
     if (execution.status === "Failure") {
-      throw new Error(failureMessage(execution));
+      throw new Error(executionFailureMessage(execution));
     }
     jobs.finish();
     return execution;

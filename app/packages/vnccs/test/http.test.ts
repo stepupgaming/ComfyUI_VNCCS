@@ -53,11 +53,30 @@ describe("VnccsHttp", () => {
   });
 
   it("rejects a non-JSON response", async () => {
-    const { send } = recorder(new Response("<html>", { status: 502 }));
+    const { send } = recorder(
+      new Response("<html>", {
+        status: 502,
+        headers: { "Content-Type": "text/html" },
+      })
+    );
     const http = new VnccsHttp("http://127.0.0.1:8188", send);
     await expect(http.get("/vnccs/config")).rejects.toThrow(
       "Invalid server response (HTTP 502)"
     );
+  });
+
+  it("raises a plain-text error body", async () => {
+    const { send } = recorder(
+      new Response("  CUDA out of memory\n", {
+        status: 500,
+        headers: { "Content-Type": "text/plain; charset=utf-8" },
+      })
+    );
+    const http = new VnccsHttp("http://127.0.0.1:8188", send);
+    await expect(http.post("/vnccs/preview_generate")).rejects.toMatchObject({
+      message: "CUDA out of memory",
+      status: 500,
+    });
   });
 
   it("resolves stored media paths", () => {

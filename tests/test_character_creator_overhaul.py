@@ -51,13 +51,36 @@ def test_overhaul_only_patches_diffusion_weights(monkeypatch, strength):
 
 def test_missing_enabled_overhaul_has_an_actionable_error(monkeypatch):
     monkeypatch.setattr(creator, "get_lora_full_path", lambda name: None)
+    monkeypatch.setattr(creator, "safe_filename_list", lambda category: ["other.safetensors"])
     with pytest.raises(ValueError, match="Download.*or set its strength to 0"):
         creator.apply_creator_overhaul("model", "clip", {"generation_mode": "qi2"}, None)
 
 
+def test_versioned_catalogue_download_is_applied_when_the_pinned_name_is_absent(monkeypatch):
+    monkeypatch.setattr(creator, "get_lora_full_path", lambda name: None)
+    monkeypatch.setattr(creator, "safe_filename_list", lambda category: [
+        "other.safetensors",
+        "QI2.1\\VNCCS\\VNCCS_QI2_AnimeOverhaulV1.2.safetensors",
+        "QI2.1/VNCCS/VNCCS_QI2_AnimeOverhaulV1.10.safetensors",
+        "QI2.1/VNCCS/VNCCS_QI2_AnimeOverhaulV1.safetensors.bak",
+    ])
+    calls = []
+    def apply(*args):
+        calls.append(args)
+        return "patched-model", args[1]
+    creator.apply_creator_overhaul("model", "clip", {
+        "generation_mode": "qi2", "qi2_overhaul_strength": .5,
+    }, apply)
+    assert calls == [("model", "clip", "QI2.1/VNCCS/VNCCS_QI2_AnimeOverhaulV1.10.safetensors", .5, 0.0)]
+
+
 @pytest.mark.parametrize("mode", ["qi2", "anima", "illustrious"])
-def test_manual_slots_cannot_double_apply_or_leak_overhaul(mode):
-    stack = [{"name": creator.QI2_OVERHAUL_LORA_NAME.replace("/", "\\"), "strength": .5},
+@pytest.mark.parametrize("name", [
+    creator.QI2_OVERHAUL_LORA_NAME.replace("/", "\\"),
+    "QI2.1/VNCCS/VNCCS_QI2_AnimeOverhaulV1.2.safetensors",
+])
+def test_manual_slots_cannot_double_apply_or_leak_overhaul(mode, name):
+    stack = [{"name": name, "strength": .5},
              {"name": "other.safetensors", "strength": .75}]
     normalized = creator.normalize_gen_settings({"generation_mode": mode, "lora_stack": stack})
     assert normalized["lora_stack"] == [stack[1]]

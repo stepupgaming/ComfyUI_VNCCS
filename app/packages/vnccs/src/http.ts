@@ -25,6 +25,20 @@ export type Query = Record<string, string | number | boolean | undefined>;
 
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
+const MAX_TEXT_ERROR = 500;
+
+/** Many VNCCS routes answer failures with a plain-text body (`web.Response(text=...)`). */
+function textErrorMessage(response: Response, text: string): string {
+  const type = response.headers.get("content-type") ?? "";
+  const trimmed = text.trim();
+  if (trimmed && type.startsWith("text/plain")) {
+    return trimmed.length > MAX_TEXT_ERROR
+      ? `${trimmed.slice(0, MAX_TEXT_ERROR)}…`
+      : trimmed;
+  }
+  return `Invalid server response (HTTP ${response.status})`;
+}
+
 function errorMessage(data: unknown): string | null {
   if (data && typeof data === "object" && "error" in data) {
     const { error } = data as { error: unknown };
@@ -84,14 +98,15 @@ export class VnccsHttp {
       cache: "no-store",
       ...rest,
     });
+    const text = await response.text();
     let data: unknown;
     try {
-      data = await response.json();
+      data = JSON.parse(text);
     } catch {
       throw new VnccsRequestError(
         route,
         response.status,
-        `Invalid server response (HTTP ${response.status})`,
+        textErrorMessage(response, text),
         null
       );
     }

@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="vnccs-studio-origin" content="{{studio_origin}}">
+    <title>VNCCS Pose Studio</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #0a0a0f;
+        color-scheme: dark;
+      }
+
+      #pose-studio {
+        position: fixed;
+        inset: 0;
+      }
+
+      #pose-studio-status {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        color: #9898a8;
+        font: 13px/1.5 system-ui, sans-serif;
+        text-align: center;
+      }
+
+      #pose-studio-status[hidden] {
+        display: none;
+      }
+    </style>
+    <script type="module" src="/vnccs/studio/pose_host.mjs"></script>
+  </head>
+  <body>
+    <div id="pose-studio"></div>
+    <div id="pose-studio-status">Loading Pose Studio...</div>
+  </body>
+</html>

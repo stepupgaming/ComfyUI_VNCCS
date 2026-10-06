@@ -30,9 +30,60 @@ export function hostIdFor(url: string): string {
   return `${HOST_ID}-${normalized.replace(NON_ALPHANUMERIC, "-").toLowerCase()}`;
 }
 
+/** The JSON events comfy-ts routes; it reports every other type as an error. */
+const COMFY_TS_EVENTS = new Set([
+  "executed",
+  "executing",
+  "execution_cached",
+  "execution_error",
+  "execution_start",
+  "execution_success",
+  "logs",
+  "manager-terminal-feedback",
+  "progress",
+  "progress_state",
+  "status",
+]);
+
+/** False for a JSON server event comfy-ts has no route for; binary frames pass. */
+export function isComfyTsEvent(data: unknown): boolean {
+  if (typeof data !== "string") {
+    return true;
+  }
+  let type: unknown;
+  try {
+    type = (JSON.parse(data) as { type?: unknown } | null)?.type;
+  } catch {
+    return true;
+  }
+  return typeof type !== "string" || COMFY_TS_EVENTS.has(type);
+}
+
+const filteredHosts = new WeakSet<ComfyHost>();
+
+/**
+ * Custom nodes broadcast their own events (`vnccs.*`, `vnccs_req_pose_sync`,
+ * ...) to every client, and comfy-ts logs each one as an unknown message.
+ * The studio reads those on its own socket, so the host skips them.
+ */
+function skipForeignEvents(host: ComfyHost): ComfyHost {
+  if (!filteredHosts.has(host)) {
+    filteredHosts.add(host);
+    const route = host.onMessage;
+    host.onMessage = (event) => {
+      if (isComfyTsEvent(event.data)) {
+        route.call(host, event);
+      }
+    };
+  }
+  return host;
+}
+
 export function comfyHost(url: string): ComfyHost {
   const comfy = ComfyTS.create();
-  return comfy.host({ id: hostIdFor(url), url, sdkAutoWrite: false });
+  return skipForeignEvents(
+    comfy.host({ id: hostIdFor(url), url, sdkAutoWrite: false })
+  );
 }
 
 export interface RunPromptOptions {
@@ -48,6 +99,18 @@ export class PromptProblemsError extends Error {
     super(`The workflow has problems:\n${problems.join("\n")}`);
     this.problems = problems;
   }
+}
+
+/** The server's reason for a failed run: `NodeType: message` when known. */
+export function executionFailureMessage(
+  execution: Pick<ComfyExecution, "data">
+): string {
+  const error = execution.data.error?.data;
+  const message = error?.exception_message?.trim();
+  if (!message) {
+    return "The run failed";
+  }
+  return error?.node_type ? `${error.node_type}: ${message}` : message;
 }
 
 /**
