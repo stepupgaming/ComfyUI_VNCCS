@@ -8,11 +8,9 @@ import {
   type EmotionStudioState,
   emotionGenerationDefaults,
   filterEmotions,
-  generationModelForMode,
   initializeEmotionStudioState,
   parseEmotionStudioState,
   parseGenerationSettings,
-  promptStyleForMode,
   selectAllButton,
   selectedEmotionEntries,
   selectVisibleSummary,
@@ -23,6 +21,10 @@ import {
 import type { EmotionEntry } from "../src/emotions";
 import { buildEmotionPrompt, EMOTION_IDS } from "../src/graphs";
 import { liveCatalog, QI2_UNET, VIGGLE_TURBO } from "./fixtures/catalog";
+
+const QI2_MODEL = "qwen_image_2.1_int8_convrot.safetensors";
+const QI2_CLIP = "qwen3vl_8b_int8_convrot.safetensors";
+const QI2_VAE = "qwen_image_2.1_vae_bf16.safetensors";
 
 function context(overrides: Partial<EmotionContext> = {}): EmotionContext {
   const catalog = liveCatalog();
@@ -40,22 +42,11 @@ function context(overrides: Partial<EmotionContext> = {}): EmotionContext {
   };
 }
 
-const LISTS = {
-  characters: ["StudioQA"],
-  checkpoints: [],
-  diffusion_models: [],
-  loras: [],
-  samplers: ["euler"],
-  schedulers: ["simple"],
-  text_encoders: [],
-  vae_models: [],
-};
-
 function load(saved: unknown = null, ctx = context()): EmotionStudioState {
   const state = parseEmotionStudioState(
     saved === null ? null : JSON.stringify(saved)
   );
-  return initializeEmotionStudioState(state, ctx, LISTS);
+  return initializeEmotionStudioState(state, ctx);
 }
 
 function save(
@@ -81,133 +72,140 @@ function emotion(safeName: string, description = ""): EmotionEntry {
 }
 
 describe("Emotion Studio generation settings", () => {
-  it("defaults to Anima with the widget's per-family profiles", () => {
+  it("defaults to the widget's Qwen Image 2.1 profile", () => {
     const defaults = emotionGenerationDefaults();
     expect(defaults).toMatchObject({
-      generation_mode: "anima",
-      clip_name: "qwen_3_06b_base.safetensors",
-      vae_name: "qwen_image_vae.safetensors",
-      clip_type: "stable_diffusion",
-      sampler: "er_sde",
+      generation_mode: "qi2",
+      diffusion_model_name: QI2_MODEL,
+      clip_name: QI2_CLIP,
+      vae_name: QI2_VAE,
+      clip_type: "qwen_image",
+      sampler: "euler",
       scheduler: "simple",
-      steps: 30,
-      cfg: 4,
+      steps: 25,
+      cfg: 3,
       seed: 0,
       seed_mode: "fixed",
       turbo_enabled: false,
-      dmd_lora_name: "anima\\anima-turbo-lora-v0.1.safetensors",
-    });
-    expect(defaults.lora_stack).toHaveLength(5);
-    expect(defaults.mode_settings.illustrious).toMatchObject({
-      sampler: "euler",
-      scheduler: "normal",
-      steps: 20,
-      cfg: 8,
-      dmd_lora_name: "",
-    });
-    expect(defaults.mode_settings.qi2).toMatchObject({
-      diffusion_model_name: "qwen_image_2.1_int8_convrot.safetensors",
-      clip_name: "qwen3vl_8b_int8_convrot.safetensors",
-      vae_name: "qwen_image_2.1_vae_bf16.safetensors",
-      clip_type: "qwen_image",
-      steps: 25,
-      cfg: 3,
+      dmd_lora_name:
+        "QI2/Viggle/Qwen-Image-2.1-viggle-turbo-v0.2.1-6step-lora-r128.safetensors",
       qi2_cache: { device: "gpu", dtype: "int8" },
     });
+    expect(defaults.lora_stack).toHaveLength(5);
+    expect(defaults).not.toHaveProperty("mode_settings");
   });
 
   it("merges saved settings shallowly over the defaults", () => {
     const gen = parseGenerationSettings(
-      JSON.stringify({ generation_mode: "qi2", mode_settings: { qi2: {} } })
+      JSON.stringify({ generation_mode: "qi2", steps: 12 })
     );
-    expect(gen.generation_mode).toBe("qi2");
-    expect(gen.steps).toBe(30);
-    expect(Object.keys(gen.mode_settings)).toEqual(["qi2"]);
-    expect(parseGenerationSettings("{not json").generation_mode).toBe("anima");
+    expect(gen).toMatchObject({ generation_mode: "qi2", steps: 12, cfg: 3 });
+    expect(parseGenerationSettings("{not json")).toEqual(
+      emotionGenerationDefaults()
+    );
   });
 
-  it("derives generation_model and prompt_style from the family", () => {
-    expect(generationModelForMode("qi2")).toBe("QI2");
-    expect(generationModelForMode("ANIMA")).toBe("Anima");
-    expect(generationModelForMode("illustrious")).toBe("Illustrious");
-    expect(promptStyleForMode("anima")).toBe("Anima");
-    expect(promptStyleForMode("qi2")).toBe("SDXL Style");
-    expect(promptStyleForMode("")).toBe("Anima");
-  });
-
-  it("saves the active family's profile and shares the seed", () => {
-    const state = save(load(), (model) => {
-      model.setValue("steps", 18);
-      model.setValue("seed", 42);
+  it("moves settings saved under Anima to their QI2 profile", () => {
+    const state = load({
+      gen: {
+        generation_mode: "anima",
+        diffusion_model_name: "minimax_h3_fl2va_bf16.safetensors",
+        clip_name: "qwen_3_06b_base.safetensors",
+        vae_name: "qwen_image_vae.safetensors",
+        steps: 30,
+        cfg: 4,
+        seed: 7,
+        seed_mode: "randomize",
+        selected_pose_indices: [2],
+        mode_settings: {
+          anima: { steps: 30 },
+          qi2: {
+            generation_mode: "qi2",
+            diffusion_model_name: "custom/qwen_image_2.1_mine.safetensors",
+            clip_name: "qwen_3_06b_base.safetensors",
+            steps: 12,
+            cfg: 2.5,
+          },
+        },
+      },
     });
-    expect(state.gen.mode_settings.anima).toMatchObject({
-      steps: 18,
-      seed: 42,
-    });
-    expect(state.gen.mode_settings.anima).not.toHaveProperty("mode_settings");
-    expect(state.gen.mode_settings.illustrious?.seed).toBe(42);
-    expect(state.gen.mode_settings.qi2?.seed).toBe(42);
-  });
-
-  it("switches families through their saved profiles", () => {
-    let state = save(load(), (model) => {
-      model.setValue("steps", 18);
-      model.setValue("seed", 7);
-    });
-    state = save(state, (model) => model.setGenerationMode("qi2"));
     expect(state.gen).toMatchObject({
       generation_mode: "qi2",
+      diffusion_model_name: "custom/qwen_image_2.1_mine.safetensors",
+      clip_name: QI2_CLIP,
+      vae_name: QI2_VAE,
+      steps: 12,
+      cfg: 2.5,
+      seed: 7,
+      seed_mode: "randomize",
+    });
+    expect(state.gen).not.toHaveProperty("mode_settings");
+    expect(state.poses).toEqual([2]);
+  });
+
+  it("starts from the QI2 defaults when Illustrious left no QI2 profile", () => {
+    const state = load({
+      gen: {
+        generation_mode: "illustrious",
+        ckpt_name: "Illustrious/ILFlatMix.safetensors",
+        steps: 20,
+        cfg: 8,
+        seed: 3,
+      },
+    });
+    expect(state.gen).toMatchObject({
+      generation_mode: "qi2",
+      diffusion_model_name: QI2_MODEL,
       steps: 25,
       cfg: 3,
-      seed: 7,
-      clip_type: "qwen_image",
-      diffusion_model_name: "qwen_image_2.1_int8_convrot.safetensors",
+      seed: 3,
     });
-    const qi2 = view(state);
-    expect(qi2.generationModel()).toBe("QI2");
-    expect(qi2.promptStyle()).toBe("SDXL Style");
-    expect(qi2.emotionMode()).toBe("qi2");
-    state = save(state, (model) => model.setGenerationMode("anima"));
-    expect(state.gen).toMatchObject({ generation_mode: "anima", steps: 18 });
-    state = save(state, (model) => model.setGenerationMode("bogus"));
-    expect(state.gen.generation_mode).toBe("anima");
+    expect(state.gen).not.toHaveProperty("ckpt_name");
   });
 
-  it("fills empty model slots from the catalog and local lists", () => {
-    const state = load();
-    expect(state.gen).toMatchObject({
-      diffusion_model_name: "anima-base-v1.0.safetensors",
-      clip_name: "qwen_3_06b_base.safetensors",
-      vae_name: "qwen_image_vae.safetensors",
-    });
-    const illustrious = save(state, (model) =>
-      model.setGenerationMode("illustrious")
-    );
-    expect(illustrious.gen.ckpt_name).toBe("Illustrious/ILFlatMix.safetensors");
+  it("replaces an empty or non-QI2 model with the catalog's QI2 model", () => {
+    const local = {
+      ...NO_LOCAL_ASSETS,
+      diffusion_models: ["minimax_h3_fl2va_bf16.safetensors"],
+    };
+    for (const name of ["", "minimax_h3_fl2va_bf16.safetensors"]) {
+      const saved = {
+        gen: { generation_mode: "qi2", diffusion_model_name: name },
+      };
+      expect(load(saved, context({ local })).gen.diffusion_model_name).toBe(
+        QI2_MODEL
+      );
+      expect(
+        load(saved, context({ catalog: null, local })).gen.diffusion_model_name
+      ).toBe(QI2_MODEL);
+    }
   });
 
-  it("lists model cards per family, local-only files last", () => {
+  it("lists QI2 models only, local files named like Qwen Image 2 last", () => {
+    const mine = "QI2/Qwen-Image-2.1-mine.safetensors";
     const ctx = context({
       local: {
         ...NO_LOCAL_ASSETS,
         diffusion_models: [
-          "qwen_image_2.1_int8_convrot.safetensors",
-          "mine.safetensors",
+          QI2_MODEL,
+          "minimax_h3_fl2va_bf16.safetensors",
+          "anima-base-v1.0.safetensors",
+          mine,
         ],
       },
     });
     const model = view(load(null, ctx), ctx);
-    const qi2 = model.modelEntries("qi2");
-    expect(qi2.map((entry) => entry.name)).toEqual([
-      QI2_UNET,
-      "mine.safetensors",
-    ]);
-    expect(qi2[0]?.status).toBe("installed");
-    expect(model.selectedModelKey("illustrious")).toBe("ckpt_name");
-    expect(model.selectedModelKey("qi2")).toBe("diffusion_model_name");
-    expect(model.modelEntries("anima").map((entry) => entry.name)).toContain(
-      "Anima Base v1.0"
-    );
+    const entries = model.modelEntries();
+    expect(entries.map((entry) => entry.name)).toEqual([QI2_UNET, mine]);
+    expect(entries[0]?.status).toBe("installed");
+    expect(model.selectedModelEntry()?.name).toBe(QI2_UNET);
+    const picked = save(load(null, ctx), (m) => m.selectModel(mine), ctx);
+    expect(picked.gen).toMatchObject({
+      diffusion_model_name: mine,
+      clip_name: QI2_CLIP,
+      vae_name: QI2_VAE,
+      clip_type: "qwen_image",
+    });
   });
 
   it("toggles the seed mode and randomizes only when asked", () => {
@@ -221,12 +219,10 @@ describe("Emotion Studio generation settings", () => {
       expect(model.randomizeSeedIfNeeded(() => 0.5)).toBe(true);
     });
     expect(state.gen.seed).toBe(Math.floor(0.5 * 9_007_199_254_740_991));
-    expect(state.gen.mode_settings.qi2?.seed).toBe(state.gen.seed);
   });
 
   it("edits LoRA stack rows and the QI2 cache", () => {
-    let state = save(load(), (model) => model.setGenerationMode("qi2"));
-    state = save(state, (model) => {
+    const state = save(load(), (model) => {
       model.setLoraSlot(1, { name: "style.safetensors", strength: 0.5 });
       model.setQi2Cache({ device: "cpu" });
     });
@@ -240,17 +236,23 @@ describe("Emotion Studio generation settings", () => {
 });
 
 describe("Emotion Studio turbo", () => {
-  it("runs Anima turbo at 12 steps and CFG 1, then restores", () => {
-    let state = load();
+  it("runs Viggle turbo at 6 euler/simple steps, then restores", () => {
+    let state = save(load(), (model) => {
+      model.setValue("steps", 30);
+      model.setValue("sampler", "er_sde");
+    });
     const card = view(state).turboCards()[0];
-    expect(card?.entry.name).toBe("Anima Turbo LoRA");
+    expect(card?.entry.name).toBe(VIGGLE_TURBO);
     expect(card?.fallback).toBe(false);
     state = save(state, (model) => model.setCcTurboMode(true, card?.rel ?? ""));
     expect(state.gen).toMatchObject({
       turbo_enabled: true,
-      steps: 12,
+      steps: 6,
       cfg: 1,
-      dmd_lora_name: "Anima/anima-turbo-lora-v0.1.safetensors",
+      sampler: "euler",
+      scheduler: "simple",
+      dmd_lora_name:
+        "QI2/Viggle/Qwen-Image-2.1-viggle-turbo-v0.2.1-6step-lora-r128.safetensors",
       dmd_lora_strength: 1,
     });
     expect(view(state).turboCards()[0]?.enabled).toBe(true);
@@ -260,93 +262,9 @@ describe("Emotion Studio turbo", () => {
     expect(state.gen).toMatchObject({
       turbo_enabled: false,
       steps: 30,
-      cfg: 4,
-    });
-  });
-
-  it("runs QI2 Viggle turbo at 6 euler/simple steps", () => {
-    let state = save(load(), (model) => model.setGenerationMode("qi2"));
-    const card = view(state).turboCards()[0];
-    expect(card?.entry.name).toBe(VIGGLE_TURBO);
-    state = save(state, (model) => model.setCcTurboMode(true, card?.rel ?? ""));
-    expect(state.gen).toMatchObject({
-      turbo_enabled: true,
-      steps: 6,
-      cfg: 1,
-      sampler: "euler",
-      scheduler: "simple",
-      dmd_lora_strength: 1,
-    });
-    state = save(state, (model) =>
-      model.setCcTurboMode(false, card?.rel ?? "")
-    );
-    expect(state.gen).toMatchObject({
-      turbo_enabled: false,
-      steps: 25,
       cfg: 3,
       dmd_lora_strength: 0,
     });
-  });
-
-  it("uses the DMD LoRA strength as the Illustrious turbo switch", () => {
-    const lora = {
-      name: "DMD2",
-      type: "TurboLora",
-      kind: "SDXL",
-      local_path: "models/loras/SDXL/dmd2.safetensors",
-      status: "installed" as const,
-    };
-    const base = context();
-    const ctx = context({
-      catalog: base.catalog && {
-        ...base.catalog,
-        lora: [...base.catalog.lora, lora],
-      },
-    });
-    let state = save(
-      load(null, ctx),
-      (model) => model.setGenerationMode("illustrious"),
-      ctx
-    );
-    const [card] = view(state, ctx).turboCards();
-    expect(card?.rel).toBe("SDXL/dmd2.safetensors");
-    expect(card?.enabled).toBe(false);
-    state = save(
-      state,
-      (model) => model.setCcTurboMode(true, card?.rel ?? ""),
-      ctx
-    );
-    expect(state.gen).toMatchObject({ steps: 4, cfg: 1, dmd_lora_strength: 1 });
-    expect(view(state, ctx).turboCards()[0]?.enabled).toBe(true);
-    state = save(
-      state,
-      (model) => model.setCcTurboMode(false, card?.rel ?? ""),
-      ctx
-    );
-    // The default profile's strength of 1 reads as "already on", so the
-    // first switch saved nothing to restore, as in the widget.
-    expect(state.gen).toMatchObject({
-      steps: 4,
-      cfg: 1,
-      dmd_lora_name: "",
-      dmd_lora_strength: 0,
-    });
-    state = save(
-      state,
-      (model) => {
-        model.setValue("steps", 20);
-        model.setValue("cfg", 8);
-        model.setCcTurboMode(true, card?.rel ?? "");
-      },
-      ctx
-    );
-    expect(state.gen).toMatchObject({ steps: 4, cfg: 1 });
-    state = save(
-      state,
-      (model) => model.setCcTurboMode(false, card?.rel ?? ""),
-      ctx
-    );
-    expect(state.gen).toMatchObject({ steps: 20, cfg: 8 });
   });
 
   it("shows a local stand-in card when the catalog has no turbo LoRA", () => {
@@ -355,30 +273,26 @@ describe("Emotion Studio turbo", () => {
     const [missing] = view(state, ctx).turboCards();
     expect(missing).toMatchObject({
       fallback: true,
-      rel: "anima/anima-turbo-lora-v0.1.safetensors",
+      rel: "QI2/Viggle/Qwen-Image-2.1-viggle-turbo-v0.2.1-6step-lora-r128.safetensors",
     });
     expect(missing?.entry.status).toBe("missing");
     const installed = context({
       catalog: null,
       local: {
         ...NO_LOCAL_ASSETS,
-        loras: ["anima/anima-turbo-lora-v0.1.safetensors"],
+        loras: [
+          "QI2\\Viggle\\Qwen-Image-2.1-viggle-turbo-v0.2.1-6step-lora-r128.safetensors",
+        ],
       },
     });
     expect(view(state, installed).turboCards()[0]?.entry.status).toBe(
       "installed"
     );
-    const illustrious = save(
-      state,
-      (model) => model.setGenerationMode("illustrious"),
-      ctx
-    );
-    expect(view(illustrious, ctx).turboCards()).toEqual([]);
   });
 
   it("reports transient download states over the catalog status", () => {
     const model = view(load());
-    const entry = model.modelEntries("qi2")[0];
+    const entry = model.modelEntries()[0];
     expect(entry && model.resolveStatus("models", entry)).toBe("installed");
     const downloading = view(
       load(),
@@ -524,7 +438,7 @@ describe("Emotion Studio selection", () => {
     const model = view(state);
     expect(model.generatorSources()).toEqual({
       character: "StudioQA",
-      emotionMode: "anima",
+      emotionMode: "qi2",
       emotionPairs: [
         { costume: "Naked", emotion: "angry" },
         { costume: "Naked", emotion: "happy" },
@@ -541,12 +455,14 @@ describe("Emotion Studio selection", () => {
       character: "StudioQA",
       costumes_data: '["Naked","Simple"]',
       emotions_data: '["angry","happy"]',
-      generation_model: "Anima",
-      prompt_style: "Anima",
+      generation_model: "QI2",
+      prompt_style: "SDXL Style",
     });
     expect(JSON.parse(String(inputs.generation_settings))).toMatchObject({
-      generation_mode: "anima",
-      diffusion_model_name: "anima-base-v1.0.safetensors",
+      generation_mode: "qi2",
+      diffusion_model_name: QI2_MODEL,
+      clip_name: QI2_CLIP,
+      vae_name: QI2_VAE,
     });
   });
 });

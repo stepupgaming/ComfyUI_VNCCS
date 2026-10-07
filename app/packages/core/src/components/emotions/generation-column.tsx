@@ -8,7 +8,6 @@ import {
 } from "@workspace/core/components/common/asset-card";
 import {
   NumberField,
-  SegmentedField,
   SelectField,
 } from "@workspace/core/components/common/form-fields";
 import {
@@ -26,12 +25,9 @@ import type {
   CatalogEntry,
   DownloadCategory,
 } from "@workspace/vnccs/control-center";
-import { ccRelPath, type GenerationMode } from "@workspace/vnccs/creator-state";
+import { ccRelPath } from "@workspace/vnccs/creator-state";
 import {
-  EMOTION_EMPTY_MODELS,
   EMOTION_FIELD_HELP,
-  EMOTION_GENERATION_MODES,
-  EMOTION_LORA_HEADERS,
   EMOTION_SAMPLER_FALLBACK,
   EMOTION_SCHEDULER_FALLBACK,
   type EmotionStudioModel,
@@ -123,30 +119,24 @@ function AssetCard({
 }
 
 /** The selected model as a card that opens the VNCCS and user model lists. */
-function ModelPicker({
-  mode,
-  model,
-}: {
-  mode: GenerationMode;
-  model: EmotionStudioModel;
-}) {
+function ModelPicker({ model }: { model: EmotionStudioModel }) {
   const update = useEmotionUpdate();
   const [open, setOpen] = useState(false);
-  const entries = model.modelEntries(mode);
-  const head = model.selectedModelEntry(mode);
+  const entries = model.modelEntries();
+  const head = model.selectedModelEntry();
 
   if (!head) {
     return (
       <p className="text-muted-foreground text-xs">
-        {EMOTION_EMPTY_MODELS[mode]}
+        No Qwen Image 2.1 diffusion models found.
       </p>
     );
   }
 
-  const current = model.selectedModelRel(mode);
+  const current = model.selectedModelRel();
   const select = (rel: string) => {
     setOpen(false);
-    update((next) => next.selectModel(mode, rel));
+    update((next) => next.selectModel(rel));
   };
   const groups = [
     {
@@ -296,11 +286,10 @@ function LoraStack({ model }: { model: EmotionStudioModel }) {
   );
 }
 
-/** Family tabs, model, sampling and LoRAs: the widget's Generation section. */
+/** Model, sampling and LoRAs: the widget's Generation section with Qwen Image 2.1 only. */
 export function GenerationColumn({ model }: { model: EmotionStudioModel }) {
   const update = useEmotionUpdate();
   const lists = useEmotionStore((store) => store.lists);
-  const mode = (model.emotionMode() || "anima") as GenerationMode;
   const g = model.gen;
   const samplers = lists?.samplers.length
     ? lists.samplers
@@ -312,15 +301,7 @@ export function GenerationColumn({ model }: { model: EmotionStudioModel }) {
   return (
     <div className="flex flex-col gap-4">
       <h3 className="font-medium text-sm">Generation</h3>
-      <SegmentedField
-        onChange={(next) => update((studio) => studio.setGenerationMode(next))}
-        options={EMOTION_GENERATION_MODES.map(({ label, mode: value }) => ({
-          label,
-          value,
-        }))}
-        value={mode}
-      />
-      <ModelPicker mode={mode} model={model} />
+      <ModelPicker model={model} />
       <div className="grid grid-cols-2 gap-3">
         <NumberField
           help={EMOTION_FIELD_HELP.steps}
@@ -362,31 +343,27 @@ export function GenerationColumn({ model }: { model: EmotionStudioModel }) {
         />
       </div>
       <SeedField model={model} />
-      {mode === "qi2" ? (
-        <div className="flex flex-col gap-2 rounded-lg border p-3">
-          <span className="font-medium text-sm">Qwen Image 2.1 Cache</span>
-          <div className="grid grid-cols-2 gap-3">
-            <SelectField
-              label="Device"
-              onChange={(device) =>
-                update((next) => next.setQi2Cache({ device }))
-              }
-              options={QI2_CACHE_DEVICES}
-              value={g.qi2_cache?.device || "gpu"}
-            />
-            <SelectField
-              label="Dtype"
-              onChange={(dtype) =>
-                update((next) => next.setQi2Cache({ dtype }))
-              }
-              options={QI2_CACHE_DTYPES}
-              value={g.qi2_cache?.dtype || "int8"}
-            />
-          </div>
+      <div className="flex flex-col gap-2 rounded-lg border p-3">
+        <span className="font-medium text-sm">Qwen Image 2.1 Cache</span>
+        <div className="grid grid-cols-2 gap-3">
+          <SelectField
+            label="Device"
+            onChange={(device) =>
+              update((next) => next.setQi2Cache({ device }))
+            }
+            options={QI2_CACHE_DEVICES}
+            value={g.qi2_cache?.device || "gpu"}
+          />
+          <SelectField
+            label="Dtype"
+            onChange={(dtype) => update((next) => next.setQi2Cache({ dtype }))}
+            options={QI2_CACHE_DTYPES}
+            value={g.qi2_cache?.dtype || "int8"}
+          />
         </div>
-      ) : null}
+      </div>
       <div className="flex flex-col gap-3">
-        <h3 className="font-medium text-sm">{EMOTION_LORA_HEADERS[mode]}</h3>
+        <h3 className="font-medium text-sm">Qwen Image 2.1 LoRA Stack</h3>
         <TurboCards model={model} />
         <LoraStack model={model} />
       </div>

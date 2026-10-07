@@ -3,7 +3,6 @@ import {
   applyProgressSnapshot,
   beginRegenerate,
   beginRun,
-  faceDenoiseZone,
   formatStageStatus,
   type GeneratorData,
   type GeneratorKind,
@@ -300,14 +299,14 @@ describe("Character Generator QI2 upscaler", () => {
 });
 
 describe("Character Generator emotion settings", () => {
-  function emotions(mode: string, saved: Record<string, unknown> = {}) {
+  function emotions(saved: Record<string, unknown> = {}) {
     let data = parseGeneratorData(saved);
-    const sync = (next: string) => {
+    const sync = () => {
       data = updateGeneratorData(data, "emotions", (model) => {
-        model.syncModelResolution({ emotionMode: next });
+        model.syncModelResolution({ emotionMode: "qi2" });
       });
     };
-    sync(mode);
+    sync();
     return {
       get data() {
         return data;
@@ -323,7 +322,7 @@ describe("Character Generator emotion settings", () => {
   }
 
   it("uses Native and the BBox extractor for a QI2 Emotion Studio", () => {
-    const h = emotions("qi2");
+    const h = emotions();
     h.seedQi2Defaults();
     expect(h.data.bg_remove.preset).toBe("Native");
     expect(h.data.emotion_generation).toMatchObject({
@@ -352,26 +351,27 @@ describe("Character Generator emotion settings", () => {
     expect(String(h.data.emotion_generation.qi2_prompt_template)).toContain(
       "{emotion}"
     );
-    h.sync("anima");
-    expect(h.data.bg_remove.preset).toBe("balanced");
-    expect(
-      h
-        .model()
-        .settingsGroups()
-        .some((group) => group.title === "FaceDetailer")
-    ).toBe(true);
+  });
+
+  it("offers only the QI2 face pass, even before it follows the Emotion Studio", () => {
+    const titles = new GeneratorModel(parseGeneratorData({}), "emotions")
+      .settingsGroups()
+      .map((group) => group.title);
+    expect(titles).toContain("VNCCS BBox Extractor · QI2 Face Generation");
+    expect(titles).toContain("VNCCS Emotion Crop Merge");
+    expect(titles).not.toContain("FaceDetailer");
+    expect(titles).not.toContain("SAMLoader");
   });
 
   it("keeps saved bbox values; defaults only fill what is missing", () => {
-    const h = emotions("qi2", {
+    const h = emotions({
       emotion_generation: { bbox_dilation: 17, feather: 9 },
     });
     expect(h.data.emotion_generation).toMatchObject({
       bbox_dilation: 17,
       feather: 9,
     });
-    h.sync("anima");
-    h.sync("qi2");
+    h.sync();
     expect(h.data.emotion_generation).toMatchObject({
       bbox_dilation: 17,
       feather: 9,
@@ -379,7 +379,7 @@ describe("Character Generator emotion settings", () => {
   });
 
   it("names stages after the emotion pairs", () => {
-    const h = emotions("qi2");
+    const h = emotions();
     expect(h.model().stages()).toEqual([
       { key: "emotion_0001_bg_remove", label: "Emotion" },
     ]);
@@ -423,33 +423,6 @@ describe("Character Generator emotion settings", () => {
     expect(sync({ character: "", emotionPairs: [] })).toBe(true);
     expect(data.character_name).toBe("");
     expect(data.emotion_pairs).toEqual([]);
-  });
-
-  it("grades face denoise per family like the widget's Emotion Strength", () => {
-    const zones = (mode: string) =>
-      [0.49, 0.5, 0.65, 0.66, 0.59, 0.6, 0.75, 0.76].map((value) =>
-        faceDenoiseZone(value, mode)
-      );
-    expect(zones("illustrious")).toEqual([
-      "weak",
-      "optimal",
-      "optimal",
-      "excessive",
-      "optimal",
-      "optimal",
-      "excessive",
-      "excessive",
-    ]);
-    expect(zones("anima")).toEqual([
-      "weak",
-      "weak",
-      "optimal",
-      "optimal",
-      "weak",
-      "optimal",
-      "optimal",
-      "excessive",
-    ]);
   });
 });
 

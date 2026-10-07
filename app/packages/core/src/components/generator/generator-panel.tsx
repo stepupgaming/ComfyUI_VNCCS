@@ -256,7 +256,7 @@ export function GeneratorPanel({
         <h3 className="font-medium text-sm">
           {GENERATOR_TITLE[handle.target.kind]}
         </h3>
-        <GeneratorInlineSettings handle={handle} sources={sources} />
+        <GeneratorInlineSettings handle={handle} />
         <Button onClick={() => setSettingsOpen(true)} variant="outline">
           <Settings2 />
           Generator Settings

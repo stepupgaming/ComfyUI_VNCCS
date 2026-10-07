@@ -408,17 +408,6 @@ export function modelResolutionKey(state: NodeState): {
   return { kind, key: JSON.stringify([kind, type, model]) };
 }
 
-export type FaceDenoiseZone = "weak" | "optimal" | "excessive";
-
-/** The Emotion Strength bands: Anima keeps its likeness at more redraw than Illustrious. */
-export function faceDenoiseZone(value: number, mode: string): FaceDenoiseZone {
-  const anima = mode === "anima";
-  if (value < (anima ? 0.6 : 0.5)) {
-    return "weak";
-  }
-  return value <= (anima ? 0.75 : 0.65) ? "optimal" : "excessive";
-}
-
 export interface StageDef {
   key: string;
   label: string;
@@ -1014,7 +1003,7 @@ export class GeneratorModel {
     const qi2 = this.isQi2();
     const groups: SettingsGroup[] = [];
     if (this.isEmotions) {
-      groups.push(...this.emotionGroups(qi2));
+      groups.push(...this.emotionGroups());
     } else {
       groups.push(
         {
@@ -1161,236 +1150,85 @@ export class GeneratorModel {
     return groups;
   }
 
-  private emotionGroups(qi2: boolean): SettingsGroup[] {
-    const groups: SettingsGroup[] = [];
-    const detector = (key: string, label: string) =>
-      select("emotion_generation", key, label, [], {
-        nodeName: "UltralyticsDetectorProvider",
-        inputName: "model_name",
-        wide: true,
-      });
-    groups.push({
-      title: "UltralyticsDetectorProvider",
-      fields: qi2
-        ? [detector("bbox_model", "bbox detector model")]
-        : [
-            detector("bbox_model", "bbox detector model"),
-            detector("segm_model", "segmentation detector model"),
-          ],
-    });
-    if (qi2) {
-      groups.push(
-        {
-          title: "VNCCS BBox Extractor · QI2 Face Generation",
-          fields: [
-            resolutionScale("emotion_generation", "target_size"),
-            number(
-              "emotion_generation",
-              "bbox_threshold",
-              "threshold",
-              0,
-              1,
-              0.01
-            ),
-            number(
-              "emotion_generation",
-              "bbox_dilation",
-              "dilation",
-              0,
-              1024,
-              1
-            ),
-            number("emotion_generation", "feather", "feather", 0, 1024, 1),
-            number("emotion_generation", "drop_size", "drop_size", 1, 4096, 1),
-          ],
-          note: "The crop is encoded by Text Encode Qwen Image 2.1, generated at the selected megapixel scale, resized to the original crop bounds, and pasted back at the same coordinates. Feather controls the blend at the paste boundary.",
-        },
-        {
-          title: "Text Encode Qwen Image 2.1 · Emotion Prompt",
-          fields: [
-            textarea(
-              "emotion_generation",
-              "qi2_prompt_template",
-              "prompt template"
-            ),
-          ],
-          note: "Use {emotion} where the selected card's natural prompt and description tags should be inserted.",
-        }
-      );
-    } else {
-      const face = (key: string, options: string[]) =>
-        select("emotion_generation", key, key, options, {
-          nodeName: "FaceDetailer",
-          inputName: key,
-        });
-      groups.push(
-        {
-          title: "SAMLoader",
-          fields: [
-            check(
-              "emotion_generation",
-              "use_sam",
-              "Connect SAM and segmentation detector to FaceDetailer"
-            ),
-            select("emotion_generation", "sam_model", "model_name", [], {
-              nodeName: "SAMLoader",
+  /** Studio generates emotions with Qwen Image 2.1 only, so there is no FaceDetailer pass to configure. */
+  private emotionGroups(): SettingsGroup[] {
+    return [
+      {
+        title: "UltralyticsDetectorProvider",
+        fields: [
+          select(
+            "emotion_generation",
+            "bbox_model",
+            "bbox detector model",
+            [],
+            {
+              nodeName: "UltralyticsDetectorProvider",
               inputName: "model_name",
               wide: true,
-            }),
-            select(
-              "emotion_generation",
-              "sam_device_mode",
-              "device_mode",
-              ["AUTO", "Prefer GPU", "CPU"],
-              {
-                nodeName: "SAMLoader",
-                inputName: "device_mode",
-              }
-            ),
-          ],
-        },
-        {
-          title: "FaceDetailer",
-          fields: [
-            number(
-              "emotion_generation",
-              "guide_size",
-              "guide_size",
-              64,
-              16_384,
-              8
-            ),
-            check("emotion_generation", "guide_size_for", "guide_size_for"),
-            number("emotion_generation", "max_size", "max_size", 64, 16_384, 8),
-            check(
-              "emotion_generation",
-              "inherit_pipe_sampler",
-              "Use sampler and scheduler from connected pipe"
-            ),
-            face("sampler_name", []),
-            face("scheduler", []),
-            number("emotion_generation", "feather", "feather", 0, 1024, 1),
-            check("emotion_generation", "noise_mask", "noise_mask"),
-            check("emotion_generation", "force_inpaint", "force_inpaint"),
-            number(
-              "emotion_generation",
-              "bbox_threshold",
-              "bbox_threshold",
-              0,
-              1,
-              0.01
-            ),
-            number(
-              "emotion_generation",
-              "bbox_dilation",
-              "bbox_dilation",
-              0,
-              1024,
-              1
-            ),
-            number(
-              "emotion_generation",
-              "bbox_crop_factor",
-              "bbox_crop_factor",
-              1,
-              100,
-              0.01
-            ),
-            face("sam_detection_hint", [
-              "center-1",
-              "horizontal-2",
-              "vertical-2",
-              "rect-4",
-              "diamond-4",
-              "mask-area",
-              "mask-points",
-              "mask-point-bbox",
-              "none",
-            ]),
-            number(
-              "emotion_generation",
-              "sam_dilation",
-              "sam_dilation",
-              0,
-              1024,
-              1
-            ),
-            number(
-              "emotion_generation",
-              "sam_threshold",
-              "sam_threshold",
-              0,
-              1,
-              0.01
-            ),
-            number(
-              "emotion_generation",
-              "sam_bbox_expansion",
-              "sam_bbox_expansion",
-              0,
-              1024,
-              1
-            ),
-            number(
-              "emotion_generation",
-              "sam_mask_hint_threshold",
-              "sam_mask_hint_threshold",
-              0,
-              1,
-              0.01
-            ),
-            face("sam_mask_hint_use_negative", ["False", "True"]),
-            number("emotion_generation", "drop_size", "drop_size", 0, 4096, 1),
-            number("emotion_generation", "cycle", "cycle", 1, 100, 1),
-            check("emotion_generation", "inpaint_model", "inpaint_model"),
-            number(
-              "emotion_generation",
-              "noise_mask_feather",
-              "noise_mask_feather",
-              0,
-              1024,
-              1
-            ),
-            check("emotion_generation", "tiled_encode", "tiled_encode"),
-            check("emotion_generation", "tiled_decode", "tiled_decode"),
-          ],
-          note: "Steps and CFG come from the connected pipe. Face Detailer denoise is controlled in the main panel. Sampler and scheduler can optionally be overridden here. Seed remains per emotion item.",
-        }
-      );
-    }
-    groups.push({
-      title: qi2 ? "VNCCS Emotion Crop Merge" : "VNCCS Emotion Matte Merge",
-      fields: [
-        number(
-          "emotion_generation",
-          "matte_expand_radius",
-          "matte_expand_radius",
-          0,
-          256,
-          1
-        ),
-        number(
-          "emotion_generation",
-          "matte_feather_radius",
-          "matte_feather_radius",
-          0,
-          256,
-          1
-        ),
-        number(
-          "emotion_generation",
-          "chroma_context",
-          "chroma_context",
-          0,
-          1024,
-          1
-        ),
-      ],
-      note: qi2
-        ? "The generated QI2 face crop is returned to its original coordinates before background processing."
-        : "These parameters affect only the FaceDetailer region. The original sprite alpha remains untouched elsewhere.",
-    });
-    return groups;
+            }
+          ),
+        ],
+      },
+      {
+        title: "VNCCS BBox Extractor · QI2 Face Generation",
+        fields: [
+          resolutionScale("emotion_generation", "target_size"),
+          number(
+            "emotion_generation",
+            "bbox_threshold",
+            "threshold",
+            0,
+            1,
+            0.01
+          ),
+          number("emotion_generation", "bbox_dilation", "dilation", 0, 1024, 1),
+          number("emotion_generation", "feather", "feather", 0, 1024, 1),
+          number("emotion_generation", "drop_size", "drop_size", 1, 4096, 1),
+        ],
+        note: "The crop is encoded by Text Encode Qwen Image 2.1, generated at the selected megapixel scale, resized to the original crop bounds, and pasted back at the same coordinates. Feather controls the blend at the paste boundary.",
+      },
+      {
+        title: "Text Encode Qwen Image 2.1 · Emotion Prompt",
+        fields: [
+          textarea(
+            "emotion_generation",
+            "qi2_prompt_template",
+            "prompt template"
+          ),
+        ],
+        note: "Use {emotion} where the selected card's natural prompt and description tags should be inserted.",
+      },
+      {
+        title: "VNCCS Emotion Crop Merge",
+        fields: [
+          number(
+            "emotion_generation",
+            "matte_expand_radius",
+            "matte_expand_radius",
+            0,
+            256,
+            1
+          ),
+          number(
+            "emotion_generation",
+            "matte_feather_radius",
+            "matte_feather_radius",
+            0,
+            256,
+            1
+          ),
+          number(
+            "emotion_generation",
+            "chroma_context",
+            "chroma_context",
+            0,
+            1024,
+            1
+          ),
+        ],
+        note: "The generated QI2 face crop is returned to its original coordinates before background processing.",
+      },
+    ];
   }
 
   private bgRemoveGroups(): SettingsGroup[] {

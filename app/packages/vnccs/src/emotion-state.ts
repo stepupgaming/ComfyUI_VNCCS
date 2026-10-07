@@ -1,12 +1,10 @@
 import type { CatalogEntry, DownloadStatusMap } from "./control-center";
 import { type DownloadCategory, downloadKey } from "./control-center";
-import type { ContextLists } from "./creator";
 import {
   type CreatorCatalog,
   ccKind,
   ccRelPath,
   ccType,
-  type GenerationMode,
   type LocalAssets,
   type LoraSlot,
   type ModelEntry,
@@ -21,28 +19,18 @@ import type { EmotionStepInput, JsonState } from "./graphs";
  * Emotion Studio (`EmotionGeneratorV2`) state, ported from
  * `web/vnccs_emotion_v2.js`. The widget kept its inputs in hidden widgets:
  * `character`, `costumes_data` and `emotions_data` (selection order),
- * `generation_settings` (the flat settings of the active family plus a
- * profile per family under `mode_settings`), and `generation_model` /
- * `prompt_style`, which follow the family.
+ * `generation_settings`, and `generation_model` / `prompt_style`. Studio
+ * generates emotions with Qwen Image 2.1 only; the node's Anima and
+ * Illustrious families are not offered.
  */
 
-export const EMOTION_GENERATION_MODES: {
-  label: string;
-  mode: GenerationMode;
-}[] = [
-  { mode: "qi2", label: "Qwen Image 2.1" },
-  { mode: "anima", label: "Anima" },
-  { mode: "illustrious", label: "Illustrious" },
-];
-
-const ANIMA_TURBO_LORA_NAME = "anima\\anima-turbo-lora-v0.1.safetensors";
-const ANIMA_CLIP_NAME = "qwen_3_06b_base.safetensors";
-const ANIMA_VAE_NAME = "qwen_image_vae.safetensors";
 const QI2_TURBO_LORA_NAME =
   "QI2/Viggle/Qwen-Image-2.1-viggle-turbo-v0.2.1-6step-lora-r128.safetensors";
 const QI2_MODEL_NAME = "qwen_image_2.1_int8_convrot.safetensors";
 const QI2_CLIP_NAME = "qwen3vl_8b_int8_convrot.safetensors";
 const QI2_VAE_NAME = "qwen_image_2.1_vae_bf16.safetensors";
+/** How Comfy-Org and most finetunes name Qwen Image 2.x diffusion models. */
+const QI2_FILE_NAME = /qwen[-_ ]?image[-_ ]?2/i;
 const LORA_SLOTS = 5;
 const MAX_SEED = 9_007_199_254_740_991;
 
@@ -61,18 +49,6 @@ export const EMOTION_SCHEDULER_FALLBACK = [
   "sgm_uniform",
 ];
 
-export const EMOTION_EMPTY_MODELS: Record<GenerationMode, string> = {
-  anima: "No Anima diffusion models found.",
-  illustrious: "No Illustrious checkpoints found.",
-  qi2: "No Qwen Image 2.1 diffusion models found.",
-};
-
-export const EMOTION_LORA_HEADERS: Record<GenerationMode, string> = {
-  anima: "Anima LoRA Stack",
-  illustrious: "Illustrious LoRA Stack",
-  qi2: "Qwen Image 2.1 LoRA Stack",
-};
-
 /** The widget's FIELD_HELP. */
 export const EMOTION_FIELD_HELP = {
   steps:
@@ -83,40 +59,32 @@ export const EMOTION_FIELD_HELP = {
   seed: "Numeric seed for reproducible emotion generations.",
   seed_mode:
     "Toggles fixed seed versus a fresh random seed for each generation.",
-  lora_stack:
-    "Additional LoRAs mixed into emotion generation for the selected model mode.",
+  lora_stack: "Additional LoRAs mixed into emotion generation.",
   lora_strength: "Strength of the LoRA in this row.",
 } as const;
 
-/** One family's saved settings: a copy of the flat settings without `mode_settings`. */
-export interface EmotionProfile {
+/** The `generation_settings` input. */
+export interface EmotionGenSettings {
   cfg?: number;
-  ckpt_name?: string;
   clip_name?: string;
   clip_type?: string;
   diffusion_model_name?: string;
   dmd_lora_name?: string;
   dmd_lora_strength?: number;
-  generation_mode?: string;
+  generation_mode: "qi2";
   lora_stack?: LoraSlot[];
   qi2_cache?: Qi2CacheSettings;
   sampler?: string;
   scheduler?: string;
   seed?: number;
   seed_mode?: string;
+  /** Absent means every pose. */
+  selected_pose_indices?: number[];
   steps?: number;
   turbo_enabled?: boolean;
   turbo_previous_settings?: TurboPrevious | null;
   vae_name?: string;
   [key: string]: unknown;
-}
-
-/** The `generation_settings` input. */
-export interface EmotionGenSettings extends EmotionProfile {
-  generation_mode: string;
-  mode_settings: Record<string, EmotionProfile>;
-  /** Absent means every pose. */
-  selected_pose_indices?: number[];
 }
 
 export interface EmotionStudioState {
@@ -171,99 +139,27 @@ function emptyLoraStack(): LoraSlot[] {
   return Array.from({ length: LORA_SLOTS }, () => ({ name: "", strength: 1 }));
 }
 
-/** The widget's GENERATION_DEFAULTS: the flat keys are the Anima profile. */
+/** The widget's QI2 profile in GENERATION_DEFAULTS. */
 export function emotionGenerationDefaults(): EmotionGenSettings {
   return {
-    generation_mode: "anima",
-    ckpt_name: "",
-    diffusion_model_name: "",
-    clip_name: ANIMA_CLIP_NAME,
-    vae_name: ANIMA_VAE_NAME,
-    clip_type: "stable_diffusion",
-    sampler: "er_sde",
+    generation_mode: "qi2",
+    diffusion_model_name: QI2_MODEL_NAME,
+    clip_name: QI2_CLIP_NAME,
+    vae_name: QI2_VAE_NAME,
+    clip_type: "qwen_image",
+    sampler: "euler",
     scheduler: "simple",
-    steps: 30,
-    cfg: 4,
+    steps: 25,
+    cfg: 3,
     seed: 0,
     seed_mode: "fixed",
     turbo_enabled: false,
     turbo_previous_settings: null,
-    dmd_lora_name: ANIMA_TURBO_LORA_NAME,
+    dmd_lora_name: QI2_TURBO_LORA_NAME,
     dmd_lora_strength: 1,
+    qi2_cache: { device: "gpu", dtype: "int8" },
     lora_stack: emptyLoraStack(),
-    mode_settings: {
-      illustrious: {
-        ckpt_name: "",
-        sampler: "euler",
-        scheduler: "normal",
-        steps: 20,
-        cfg: 8,
-        seed: 0,
-        seed_mode: "fixed",
-        turbo_previous_settings: null,
-        dmd_lora_name: "",
-        dmd_lora_strength: 1,
-        lora_stack: emptyLoraStack(),
-      },
-      anima: {
-        diffusion_model_name: "",
-        clip_name: ANIMA_CLIP_NAME,
-        vae_name: ANIMA_VAE_NAME,
-        clip_type: "stable_diffusion",
-        sampler: "er_sde",
-        scheduler: "simple",
-        steps: 30,
-        cfg: 4,
-        seed: 0,
-        seed_mode: "fixed",
-        turbo_enabled: false,
-        turbo_previous_settings: null,
-        dmd_lora_name: ANIMA_TURBO_LORA_NAME,
-        dmd_lora_strength: 1,
-        lora_stack: emptyLoraStack(),
-      },
-      qi2: {
-        diffusion_model_name: QI2_MODEL_NAME,
-        clip_name: QI2_CLIP_NAME,
-        vae_name: QI2_VAE_NAME,
-        clip_type: "qwen_image",
-        sampler: "euler",
-        scheduler: "simple",
-        steps: 25,
-        cfg: 3,
-        seed: 0,
-        seed_mode: "fixed",
-        turbo_enabled: false,
-        turbo_previous_settings: null,
-        dmd_lora_name: QI2_TURBO_LORA_NAME,
-        dmd_lora_strength: 1,
-        qi2_cache: { device: "gpu", dtype: "int8" },
-        lora_stack: emptyLoraStack(),
-      },
-    },
   };
-}
-
-function isKnownMode(mode: string): mode is GenerationMode {
-  return mode === "illustrious" || mode === "anima" || mode === "qi2";
-}
-
-function normalizeEmotionMode(mode: unknown): string {
-  return String(mode || "anima").toLowerCase();
-}
-
-/** `prompt_style` follows the family: only Anima uses the Anima style. */
-export function promptStyleForMode(mode: unknown): string {
-  return normalizeEmotionMode(mode) === "anima" ? "Anima" : "SDXL Style";
-}
-
-/** `generation_model` for a family. */
-export function generationModelForMode(mode: unknown): string {
-  const normalized = normalizeEmotionMode(mode);
-  if (normalized === "qi2") {
-    return "QI2";
-  }
-  return normalized === "anima" ? "Anima" : "Illustrious";
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -288,13 +184,25 @@ function parseJsonRecord(
   }
 }
 
-/** `parseGenerationSettings`: the saved settings shallowly over the defaults. */
+/**
+ * The saved settings shallowly over the defaults. The widget kept one profile
+ * per family under `mode_settings`; settings saved while Anima or Illustrious
+ * was active restore their QI2 profile, or the defaults when there is none.
+ */
 export function parseGenerationSettings(
   raw: JsonState | null | undefined
 ): EmotionGenSettings {
+  const { mode_settings: profiles, ...saved } = parseJsonRecord(raw) ?? {};
+  const qi2 =
+    saved.generation_mode === "qi2" ? saved : asRecord(asRecord(profiles)?.qi2);
+  const defaults = emotionGenerationDefaults();
   return {
-    ...emotionGenerationDefaults(),
-    ...parseJsonRecord(raw),
+    ...defaults,
+    ...qi2,
+    generation_mode: "qi2",
+    seed: saved.seed ?? defaults.seed,
+    seed_mode: saved.seed_mode ?? defaults.seed_mode,
+    selected_pose_indices: saved.selected_pose_indices,
   } as EmotionGenSettings;
 }
 
@@ -379,24 +287,6 @@ export class EmotionStudioModel {
     return this.state.gen;
   }
 
-  mode(): string {
-    return normalizeEmotionMode(this.gen.generation_mode);
-  }
-
-  generationModel(): string {
-    return generationModelForMode(this.mode());
-  }
-
-  promptStyle(): string {
-    return promptStyleForMode(this.mode());
-  }
-
-  /** The family the Emotions Generator follows, or "" for an unknown one. */
-  emotionMode(): string {
-    const mode = this.mode();
-    return isKnownMode(mode) ? mode : "";
-  }
-
   // --- Pose selection ----------------------------------------------------------
 
   selectedPoseIndexList(): number[] | null {
@@ -458,54 +348,10 @@ export class EmotionStudioModel {
 
   // --- Generation settings -----------------------------------------------------
 
-  /**
-   * `saveGenerationSettings`: the flat settings become the active family's
-   * profile, and the shared seed is written into every profile.
-   */
+  /** `saveGenerationSettings`: the pose selection travels in the settings the node receives. */
   saveGenerationSettings(): void {
-    const g = this.gen;
     // Undefined drops the key from the JSON the node receives, which reads as "every pose".
-    g.selected_pose_indices = this.selectedPoseIndexList() ?? undefined;
-    const mode = this.mode();
-    const seed = g.seed ?? 0;
-    const seedMode = g.seed_mode || "fixed";
-    g.mode_settings ??= {};
-    g.seed = seed;
-    g.seed_mode = seedMode;
-    const { mode_settings: _profiles, ...flat } = g;
-    g.mode_settings[mode] = structuredClone(flat);
-    const defaults = emotionGenerationDefaults().mode_settings;
-    for (const profileMode of ["illustrious", "anima", "qi2"]) {
-      const profile = g.mode_settings[profileMode] ?? defaults[profileMode];
-      g.mode_settings[profileMode] = {
-        ...profile,
-        seed,
-        seed_mode: seedMode,
-      };
-    }
-  }
-
-  /** A family tab: store the current family, then load the other one's profile. */
-  setGenerationMode(mode: string): void {
-    const next = isKnownMode(mode) ? mode : "anima";
-    const g = this.gen;
-    const current = this.mode();
-    const seed = g.seed ?? 0;
-    const seedMode = g.seed_mode || "fixed";
-    const profiles = g.mode_settings ?? {};
-    const { mode_settings: _profiles, ...flat } = g;
-    profiles[current] = structuredClone(flat);
-    const defaults = emotionGenerationDefaults();
-    const profile = profiles[next] ?? defaults.mode_settings[next] ?? {};
-    const { mode_settings: _defaultProfiles, ...flatDefaults } = defaults;
-    this.state.gen = {
-      ...flatDefaults,
-      ...structuredClone(profile),
-      mode_settings: profiles,
-      generation_mode: next,
-      seed,
-      seed_mode: seedMode,
-    };
+    this.gen.selected_pose_indices = this.selectedPoseIndexList() ?? undefined;
   }
 
   setValue(key: string, value: unknown): void {
@@ -551,52 +397,8 @@ export class EmotionStudioModel {
     return true;
   }
 
-  /** `setAnimaTurboMode`: 12 steps at CFG 1; switching off restores the saved values. */
-  setAnimaTurboMode(enabled: boolean, loraName = ANIMA_TURBO_LORA_NAME): void {
-    const g = this.gen;
-    if (this.mode() !== "anima") {
-      return;
-    }
-    if (enabled) {
-      if (!g.turbo_enabled) {
-        g.turbo_previous_settings = { steps: g.steps, cfg: g.cfg };
-      }
-      g.turbo_enabled = true;
-      g.dmd_lora_name = loraName || ANIMA_TURBO_LORA_NAME;
-      g.dmd_lora_strength = 1;
-      g.steps = 12;
-      g.cfg = 1;
-    } else {
-      g.turbo_enabled = false;
-      const previous = g.turbo_previous_settings ?? {};
-      if (previous.steps !== undefined) {
-        g.steps = previous.steps;
-      }
-      if (previous.cfg !== undefined) {
-        g.cfg = previous.cfg;
-      }
-      g.turbo_previous_settings = null;
-    }
-  }
-
-  /** A turbo card toggle. QI2 runs 6 euler/simple steps; Illustrious uses its DMD2 LoRA at 4. */
+  /** A turbo card toggle: Viggle runs 6 euler/simple steps at CFG 1; off restores steps and CFG. */
   setCcTurboMode(enabled: boolean, rel: string): void {
-    const g = this.gen;
-    const mode = this.mode();
-    if (mode === "anima") {
-      g.dmd_lora_name = rel || g.dmd_lora_name || "";
-      this.setAnimaTurboMode(
-        enabled,
-        rel || g.dmd_lora_name || ANIMA_TURBO_LORA_NAME
-      );
-    } else if (mode === "qi2") {
-      this.setQi2TurboMode(enabled, rel);
-    } else {
-      this.setIllustriousTurboMode(enabled, rel);
-    }
-  }
-
-  private setQi2TurboMode(enabled: boolean, rel: string): void {
     const g = this.gen;
     if (enabled && !g.turbo_enabled) {
       g.turbo_previous_settings = { steps: g.steps, cfg: g.cfg };
@@ -617,64 +419,18 @@ export class EmotionStudioModel {
     }
   }
 
-  /** Illustrious has no turbo flag: a DMD LoRA strength above 0 is "on". */
-  private setIllustriousTurboMode(enabled: boolean, rel: string): void {
-    const g = this.gen;
-    if (enabled) {
-      if ((g.dmd_lora_strength || 0) <= 0) {
-        g.turbo_previous_settings = { steps: g.steps, cfg: g.cfg };
-      }
-      g.dmd_lora_name = rel || g.dmd_lora_name || "";
-      g.dmd_lora_strength = 1;
-      g.steps = 4;
-      g.cfg = 1;
-    } else {
-      g.dmd_lora_name = "";
-      g.dmd_lora_strength = 0;
-      const previous = g.turbo_previous_settings ?? {};
-      if (previous.steps !== undefined) {
-        g.steps = previous.steps;
-      }
-      if (previous.cfg !== undefined) {
-        g.cfg = previous.cfg;
-      }
-      g.turbo_previous_settings = null;
-    }
-  }
-
   // --- Models --------------------------------------------------------------------
 
-  private ccEntries(
-    section: keyof CreatorCatalog,
-    kind: string | null,
-    predicate?: (entry: CatalogEntry) => boolean
-  ): CatalogEntry[] {
-    return (this.context.catalog?.[section] ?? []).filter((entry) => {
-      const kindOk = !kind || ccKind(entry) === kind.toLowerCase();
-      return kindOk && (!predicate || predicate(entry));
-    });
-  }
-
-  ensureAnimaDefaultAux(): void {
-    const g = this.gen;
-    const clip = this.ccEntries("clip", "Anima")[0];
-    const vae = this.ccEntries("vae", "Anima")[0];
-    if (clip) {
-      g.clip_name = ccRelPath(clip);
-    } else if (!g.clip_name) {
-      g.clip_name = ANIMA_CLIP_NAME;
-    }
-    if (vae) {
-      g.vae_name = ccRelPath(vae);
-    } else if (!g.vae_name) {
-      g.vae_name = ANIMA_VAE_NAME;
-    }
+  private qi2Entries(section: keyof CreatorCatalog): CatalogEntry[] {
+    return (this.context.catalog?.[section] ?? []).filter(
+      (entry) => ccKind(entry) === "qi2"
+    );
   }
 
   ensureQi2DefaultAux(): void {
     const g = this.gen;
-    const clip = this.ccEntries("clip", "QI2")[0];
-    const vae = this.ccEntries("vae", "QI2")[0];
+    const clip = this.qi2Entries("clip")[0];
+    const vae = this.qi2Entries("vae")[0];
     g.clip_name = clip ? ccRelPath(clip) : g.clip_name || QI2_CLIP_NAME;
     g.vae_name = vae ? ccRelPath(vae) : g.vae_name || QI2_VAE_NAME;
     g.clip_type = "qwen_image";
@@ -684,49 +440,35 @@ export class EmotionStudioModel {
     };
   }
 
-  modelEntries(mode: string): ModelEntry[] {
-    const local = this.context.local;
-    if (mode === "anima" || mode === "qi2") {
-      const kind = mode === "qi2" ? "QI2" : "Anima";
-      return mergeCcAndLocalEntries(
-        this.ccEntries("models", kind, (entry) => ccType(entry) === "unet"),
-        local.diffusion_models,
-        "diffusion_models",
-        "unet",
-        kind
-      );
-    }
-    return mergeCcAndLocalEntries(
-      this.ccEntries("models", null, (entry) => {
-        const kind = ccKind(entry);
-        return (
-          (kind === "illustrious" || kind === "sdxl") &&
-          ccType(entry) === "checkpoint"
-        );
-      }),
-      local.checkpoints,
-      "checkpoints",
-      "checkpoint",
-      "Illustrious"
+  /** A catalog QI2 model or a file named like one; another family's file cannot run here. */
+  isQi2Model(rel: string): boolean {
+    return (
+      QI2_FILE_NAME.test(rel) ||
+      this.qi2Entries("models").some((entry) => ccRelPath(entry) === rel)
     );
   }
 
-  selectedModelKey(
-    mode: string = this.mode()
-  ): "ckpt_name" | "diffusion_model_name" {
-    return mode === "anima" || mode === "qi2"
-      ? "diffusion_model_name"
-      : "ckpt_name";
+  /** The catalog QI2 models, then local files named like Qwen Image 2. */
+  modelEntries(): ModelEntry[] {
+    return mergeCcAndLocalEntries(
+      this.qi2Entries("models").filter((entry) => ccType(entry) === "unet"),
+      this.context.local.diffusion_models.filter((name) =>
+        this.isQi2Model(slashes(name))
+      ),
+      "diffusion_models",
+      "unet",
+      "QI2"
+    );
   }
 
-  selectedModelRel(mode: string = this.mode()): string {
-    return slashes(this.gen[this.selectedModelKey(mode)]);
+  selectedModelRel(): string {
+    return slashes(this.gen.diffusion_model_name);
   }
 
   /** The picker head: the selected entry, or the first one when the selection is unknown. */
-  selectedModelEntry(mode: string = this.mode()): ModelEntry | null {
-    const entries = this.modelEntries(mode);
-    const current = this.selectedModelRel(mode);
+  selectedModelEntry(): ModelEntry | null {
+    const entries = this.modelEntries();
+    const current = this.selectedModelRel();
     return (
       entries.find((entry) => ccRelPath(entry) === current) ??
       entries[0] ??
@@ -734,105 +476,62 @@ export class EmotionStudioModel {
     );
   }
 
-  /** Pick a model card; Anima and QI2 also pin their family's CLIP and VAE. */
-  selectModel(mode: string, rel: string): void {
+  /** Pick a model card; this also pins the QI2 CLIP and VAE. */
+  selectModel(rel: string): void {
     if (!rel) {
       return;
     }
-    if (mode === "anima") {
-      this.ensureAnimaDefaultAux();
-    } else if (mode === "qi2") {
-      this.ensureQi2DefaultAux();
-    }
-    this.gen[this.selectedModelKey(mode)] = rel;
+    this.ensureQi2DefaultAux();
+    this.gen.diffusion_model_name = rel;
   }
 
   /**
-   * What rendering the model cards wrote back: an empty model slot of the
-   * active family takes the first card, and Anima/QI2 pin their CLIP/VAE.
+   * What rendering the model cards wrote back. An empty or non-QI2 model slot
+   * (the old Anima and Illustrious profiles filled it with any local file)
+   * takes the first VNCCS card.
    */
   syncCatalogDefaults(): void {
-    const mode = this.mode();
-    const first = this.modelEntries(mode)[0];
-    if (!this.selectedModelRel(mode) && first) {
-      this.selectModel(mode, ccRelPath(first));
+    if (!this.isQi2Model(this.selectedModelRel())) {
+      const first = this.modelEntries().find(
+        (entry) => entry.source !== "local"
+      );
+      this.selectModel(first ? ccRelPath(first) : QI2_MODEL_NAME);
     }
-    if (mode === "anima") {
-      this.ensureAnimaDefaultAux();
-    } else if (mode === "qi2") {
-      this.ensureQi2DefaultAux();
-    }
+    this.ensureQi2DefaultAux();
   }
 
-  /** `loadGenerationAssets`: empty model slots take the first local files. */
-  applyContextLists(lists: ContextLists): void {
+  /** The Viggle turbo LoRA cards, with a local stand-in when the catalog has none. */
+  turboCards(): EmotionTurboCard[] {
     const g = this.gen;
-    if (!g.ckpt_name && lists.checkpoints.length > 0) {
-      g.ckpt_name = lists.checkpoints[0];
-    }
-    if (!g.diffusion_model_name && lists.diffusion_models.length > 0) {
-      g.diffusion_model_name = lists.diffusion_models[0];
-    }
-    if (!g.clip_name) {
-      g.clip_name = lists.text_encoders.includes(ANIMA_CLIP_NAME)
-        ? ANIMA_CLIP_NAME
-        : lists.text_encoders[0] || ANIMA_CLIP_NAME;
-    }
-    if (!g.vae_name) {
-      g.vae_name = lists.vae_models.includes(ANIMA_VAE_NAME)
-        ? ANIMA_VAE_NAME
-        : lists.vae_models[0] || ANIMA_VAE_NAME;
-    }
-  }
-
-  /** Turbo LoRA cards of a family, with a local stand-in when the catalog has none. */
-  turboCards(mode: string = this.mode()): EmotionTurboCard[] {
-    const g = this.gen;
-    const kindOk = (entry: CatalogEntry) => {
-      const kind = ccKind(entry);
-      if (mode === "anima") {
-        return kind === "anima";
-      }
-      if (mode === "qi2") {
-        return kind === "qi2";
-      }
-      return kind === "sdxl" || kind === "illustrious";
-    };
-    const entries: { entry: CatalogEntry; fallback: boolean }[] = (
-      this.context.catalog?.lora ?? []
-    )
-      .filter((entry) => kindOk(entry) && ccType(entry) === "turbolora")
-      .map((entry) => ({ entry, fallback: false }));
-    if (entries.length === 0 && (mode === "anima" || mode === "qi2")) {
-      const fileName =
-        mode === "qi2" ? QI2_TURBO_LORA_NAME : ANIMA_TURBO_LORA_NAME;
+    const entries: { entry: CatalogEntry; fallback: boolean }[] =
+      this.qi2Entries("lora")
+        .filter((entry) => ccType(entry) === "turbolora")
+        .map((entry) => ({ entry, fallback: false }));
+    if (entries.length === 0) {
       const installed = this.context.local.loras
         .map(slashes)
-        .includes(slashes(fileName));
+        .includes(slashes(QI2_TURBO_LORA_NAME));
       entries.push({
         fallback: true,
         entry: {
-          name:
-            mode === "qi2" ? "Qwen Image 2.1 Viggle Turbo" : "Anima Turbo LoRA",
+          name: "Qwen Image 2.1 Viggle Turbo",
           type: "turbolora",
-          kind: mode === "qi2" ? "QI2" : "Anima",
-          local_path: `models/loras/${fileName}`,
+          kind: "QI2",
+          local_path: `models/loras/${QI2_TURBO_LORA_NAME}`,
           status: installed ? "installed" : "missing",
-          description:
-            mode === "qi2"
-              ? "Six-step Viggle Turbo LoRA for Qwen Image 2.1."
-              : "Anima turbo LoRA.",
+          description: "Six-step Viggle Turbo LoRA for Qwen Image 2.1.",
         },
       });
     }
     const dmd = slashes(g.dmd_lora_name);
-    const on =
-      mode === "anima" || mode === "qi2"
-        ? Boolean(g.turbo_enabled)
-        : (g.dmd_lora_strength || 0) > 0;
     return entries.map(({ entry, fallback }) => {
       const rel = ccRelPath(entry);
-      return { entry, fallback, rel, enabled: on && dmd === rel };
+      return {
+        entry,
+        fallback,
+        rel,
+        enabled: Boolean(g.turbo_enabled) && dmd === rel,
+      };
     });
   }
 
@@ -956,7 +655,7 @@ export class EmotionStudioModel {
   generatorSources(): EmotionGeneratorSources {
     return {
       character: this.state.character,
-      emotionMode: this.emotionMode(),
+      emotionMode: "qi2",
       emotionPairs: this.emotionPairs(),
     };
   }
@@ -967,9 +666,10 @@ export class EmotionStudioModel {
       character: this.state.character,
       costumes: [...(this.state.costumes ?? [])],
       emotions: [...this.state.emotions],
-      generationModel: this.generationModel(),
+      generationModel: "QI2",
       generationSettings: JSON.stringify(this.gen),
-      promptStyle: this.promptStyle(),
+      // The node derives the style from the family; this is the value the widget sent for QI2.
+      promptStyle: "SDXL Style",
     };
   }
 }
@@ -995,15 +695,12 @@ export function updateEmotionStudioState(
   return model.state;
 }
 
-/** Init after `/vnccs/context_lists` loads. */
+/** Init: the saved state with the QI2 text encoder and VAE pinned and the pose selection saved. */
 export function initializeEmotionStudioState(
   state: EmotionStudioState,
-  context: EmotionContext,
-  lists: ContextLists
+  context: EmotionContext
 ): EmotionStudioState {
-  return updateEmotionStudioState(state, context, (model) =>
-    model.applyContextLists(lists)
-  );
+  return updateEmotionStudioState(state, context, () => undefined);
 }
 
 // --- Emotion list ---------------------------------------------------------------------

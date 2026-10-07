@@ -82,16 +82,15 @@ function EmotionsWorkspace() {
   const job = useJobStore((store) => store.current);
   const [running, setRunning] = useState(false);
   const character = model?.state.character ?? "";
-  const emotionMode = model?.emotionMode();
   const pairs = model?.emotionPairs();
   const pairsKey = pairs ? JSON.stringify(pairs) : "";
   const sources = useMemo(
     () => ({
       character,
-      emotionMode,
+      emotionMode: "qi2",
       emotionPairs: pairsKey ? JSON.parse(pairsKey) : undefined,
     }),
-    [character, emotionMode, pairsKey]
+    [character, pairsKey]
   );
   const generator = useGenerator(
     EMOTIONS_GENERATOR.kind,

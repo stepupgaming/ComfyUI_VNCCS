@@ -176,9 +176,7 @@ export async function initEmotions(): Promise<void> {
     ]);
     store().set({ characters, emotions, lists, loadError: null });
     const state = parseEmotionStudioState(store().widgetData);
-    store().setState(
-      initializeEmotionStudioState(state, emotionContext(), lists)
-    );
+    store().setState(initializeEmotionStudioState(state, emotionContext()));
     const saved = currentCharacter();
     const selected = characters.includes(saved) ? saved : characters[0] || "";
     if (selected !== saved) {
