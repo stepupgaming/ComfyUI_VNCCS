@@ -3,13 +3,14 @@
 # runtime/MODELS.md maps every file Studio loads to the folder that serves it.
 # ComfyUI searches these entries in order, so the SSD folders come first.
 
-# SSD: the QI2 and H3 weights every Studio run loads.
+# NVMe SSD: the QI2 weights every Studio run loads.
 qwen_image_21:
-    base_path: F:/Models/qwen-image-2.1/
+    base_path: C:/Models/qwen-image-2.1/
     diffusion_models: diffusion_models/
     text_encoders: text_encoders/
     vae: vae/
 
+# SATA SSD: the H3 diffusion model.
 minimax_h3_comfy:
     base_path: F:/Models/MiniMax-H3-Comfy/
     diffusion_models: diffusion_models/

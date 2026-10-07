@@ -5,8 +5,9 @@ it comes from, and which folder serves it.
 
 ComfyUI looks in `F:\VNCCS\ComfyUI\models` first (the Control Center downloads
 there), then in the `extra_model_paths.yaml` entries in file order. Keep the files
-every run loads on the SSD (`F:`) and leave archives on the HDD (`G:`): loading the
-H3 diffusion model from `G:` made one H3 sheet take about 8 minutes.
+every run loads on the SSDs (`C:` NVMe, `F:` SATA) and leave archives on the HDD (`G:`):
+loading the H3 diffusion model from `G:` made one H3 sheet take about 8 minutes. QI2 sits
+on the NVMe because every Creator, Clothes and Emotions run loads its 16 GB.
 
 Folders below are relative to `F:\VNCCS\ComfyUI\models` unless they start with a drive.
 
@@ -19,14 +20,14 @@ file's version, the Control Center downloads the latest copy instead; add a new 
 
 | Role | File | Source | Served from |
 | --- | --- | --- | --- |
-| Diffusion model | `qwen_image_2.1_int8_convrot.safetensors` | `Comfy-Org/Qwen-Image-2.1` | `F:\Models\qwen-image-2.1\diffusion_models` |
-| Text encoder | `qwen3vl_8b_int8_convrot.safetensors` | `Comfy-Org/Qwen-Image-2.1` | `F:\Models\qwen-image-2.1\text_encoders` |
-| VAE | `qwen_image_2.1_vae_bf16.safetensors` | `Comfy-Org/Qwen-Image-2.1` | `F:\Models\qwen-image-2.1\vae` |
+| Diffusion model | `qwen_image_2.1_int8_convrot.safetensors` | `Comfy-Org/Qwen-Image-2.1` | `C:\Models\qwen-image-2.1\diffusion_models` |
+| Text encoder | `qwen3vl_8b_int8_convrot.safetensors` | `Comfy-Org/Qwen-Image-2.1` | `C:\Models\qwen-image-2.1\text_encoders` |
+| VAE | `qwen_image_2.1_vae_bf16.safetensors` | `Comfy-Org/Qwen-Image-2.1` | `C:\Models\qwen-image-2.1\vae` |
 | Turbo LoRA | `QI2/Viggle/Qwen-Image-2.1-viggle-turbo-v0.2.1-6step-lora-r128.safetensors` | `Viggle/Qwen-Image-2.1-viggle-turbo` | `loras` |
 | Creator overhaul | `QI2.1/VNCCS/VNCCS_QI2_AnimeOverhaulV1.2.safetensors` | `MIUProject/VNCCS_v3.0` | `loras` |
 | Clothes Core | `QI2.1/VNCCS/VNCCS_QI2_ClothesCoreV2.6.safetensors` | `MIUProject/VNCCS_v3.0` | `loras` |
 | Pose Studio | `QI2.1/VNCCS/VNCCS_QI2_PoseStudioV1.1.safetensors` | `MIUProject/VNCCS_v3.0` | `loras` |
-| Upscaler decode VAE | `texture_fix_vae_for_qwen_image_2.1_bf16.safetensors` | `madebyollin/texture-fix-vae-for-qwen-image-2.1` at `702909b4` | `F:\Models\qwen-image-2.1\vae` |
+| Upscaler decode VAE | `texture_fix_vae_for_qwen_image_2.1_bf16.safetensors` | `madebyollin/texture-fix-vae-for-qwen-image-2.1` at `702909b4` | `C:\Models\qwen-image-2.1\vae` |
 | Upscaler Consistency LoRA | `QI2/Consistency/qwen-image-2.1-consistency.safetensors` | `ausboss/Qwen-Image-2.1-Consistency-LoRA` at `8f05b0fa` | `loras` |
 
 The QI2 upscaler downloads its two files at the pinned revisions on first use if they are
