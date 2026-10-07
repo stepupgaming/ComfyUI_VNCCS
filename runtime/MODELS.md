@@ -10,6 +10,11 @@ H3 diffusion model from `G:` made one H3 sheet take about 8 minutes.
 
 Folders below are relative to `F:\VNCCS\ComfyUI\models` unless they start with a drive.
 
+The Control Center downloads each catalog file at the Hugging Face commit pinned in
+`_CATALOG_REVISIONS` (`nodes/vnccs_control_center.py`), as long as the catalog lists the
+pinned version. Every installed file here matches its pin. When the catalog raises a
+file's version, the Control Center downloads the latest copy instead; add a new pin for it.
+
 ## QI2 (Qwen Image 2.1): Creator, Clone, Clothes, Emotions, Sprites
 
 | Role | File | Source | Served from |

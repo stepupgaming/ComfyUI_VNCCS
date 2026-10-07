@@ -1698,6 +1698,74 @@ def _download_with_progress(model_key, repo_id, filename, revision=None):
                 file_download._get_progress_bar_context = original_context
 
 
+# Hugging Face commits holding each catalog file at the version VNCCS Studio was tested with.
+# A pin applies only while the catalog lists that version, so a catalog version bump still
+# installs the new file. A revision set by the catalog entry itself always wins.
+_CATALOG_REVISIONS = {
+    "Comfy-Org/MiniMax-H3": ("e5eb578a89295337b8ff433a035929ce0279e0b6", {
+        "diffusion_models/minimax_h3_ref2va_pruned_fp8_scaled.safetensors": "1.0",
+        "diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors": "1.0",
+        "text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors": "1.0",
+        "vae/minimax_h3_audio_vae_fp32.safetensors": "1.0",
+        "vae/minimax_h3_video_vae_fp16.safetensors": "1.0",
+    }),
+    "Comfy-Org/Qwen-Image-2.1": ("cb504a4090723e43f17ad01cec0359490e2de613", {
+        "diffusion_models/qwen_image_2.1_int8_convrot.safetensors": "1.0",
+        "text_encoders/qwen3vl_8b_int8_convrot.safetensors": "1.0",
+        "vae/qwen_image_2.1_vae_bf16.safetensors": "1.0",
+    }),
+    "Comfy-Org/vae-text-encorder-for-flux-klein-9b": ("3f62d9d8ae1fec33c6e91453d5c712855b096b55", {
+        "split_files/text_encoders/qwen_3_8b_fp8mixed.safetensors": "1.0",
+        "split_files/vae/flux2-vae.safetensors": "1.0",
+    }),
+    "MIUProject/FLUX.2-klein-9b-fp8": ("1e0be3ab616597898c7859153c72d2881c46c57c", {
+        "flux-2-klein-9b-fp8.safetensors": "1.0",
+    }),
+    "MIUProject/VNCCS_PoseStudio_QI2.1": ("b0518fd047fa75d7dcd909d68390a7c1d337e5cd", {
+        "VNCCS_QI2_PoseStudioV1.safetensors": "1.0",
+    }),
+    "MIUProject/VNCCS_v3.0": ("341def44f30575c0dfaff7a256fb3a928a6fba94", {
+        "models/checkpoints/Illustrious/ILFlatMix.safetensors": "1.0",
+        "models/checkpoints/Illustrious/newgroundsMix_v20.safetensors": "1.0",
+        "models/checkpoints/Illustrious/waiIllustriousSDXL_v170.safetensors": "1.0",
+        "models/loras/Anima/anima-turbo-lora-v0.1.safetensors": "0.2.0",
+        "models/loras/DMD2/dmd2_sdxl_4step_lora_fp16.safetensors": "1.0.0",
+        "models/loras/IL/mimimeter.safetensors": "1.0.0",
+        "models/loras/Klein9b/VNCCS_ClothesCoreKlein9b_V1.safetensors": "1.0",
+        "models/loras/Klein9b/VNCCS_PoseStudioKlein9b_V2.2.safetensors": "2.2",
+        "models/loras/Klein9b/VNCCS_PoseStudioKlein9b_V2.5.safetensors": "2.5",
+        "models/loras/MiniMaxH3/VNCCS/VNCCS_ClothesCoreMiniMaxH3V1.safetensors": "1.0",
+        "models/loras/MiniMaxH3/VNCCS/VNCCS_PoseStudioH3_V1.safetensors": "1.0",
+        "models/loras/QI2.1/VNCCS/VNCCS_QI2_AnimeOverhaulV1.2.safetensors": "1.2",
+        "models/loras/QI2.1/VNCCS/VNCCS_QI2_ClothesCoreV2.6.safetensors": "2.6",
+        "models/loras/QI2.1/VNCCS/VNCCS_QI2_PoseStudioV1.1.safetensors": "1.1",
+    }),
+    "Robert1212star/TaoMate-H3-3Step-ComfyUI": ("ef113cdadcd792e2f4830b62c2ab108e52886ac8", {
+        "taomate_h3_3step_comfy.safetensors": "1.0",
+    }),
+    "Viggle/Qwen-Image-2.1-viggle-turbo": ("009a44a895ef85f7e643c80fdca9543795248867", {
+        "Qwen-Image-2.1-viggle-turbo-v0.2.1-6step-lora-r128.safetensors": "0.2.1",
+    }),
+    "circlestone-labs/Anima": ("f973fc41ec7545364ac9776c2440285f43ff2a30", {
+        "split_files/diffusion_models/anima-base-v1.0.safetensors": "1.0",
+        "split_files/text_encoders/qwen_3_06b_base.safetensors": "1.0",
+        "split_files/vae/qwen_image_vae.safetensors": "1.0",
+    }),
+    "lightx2v/Minimax-h3-Turbo": ("3ec17a324ced54151364f24f8b5fb6bf7e26414f", {
+        "minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors": "1.0",
+    }),
+}
+
+
+def _catalog_revision(repo_id, filename, entry):
+    if entry.get("revision"):
+        return entry["revision"]
+    revision, versions = _CATALOG_REVISIONS.get(repo_id, (None, {}))
+    if versions.get(filename) == str(entry.get("version", "")):
+        return revision
+    return None
+
+
 def _download_worker_loop():
     while True:
         task = _DOWNLOAD_QUEUE.get()
@@ -1722,7 +1790,7 @@ def _download_worker_loop():
                 model_key,
                 repo_id=download_repo_id,
                 filename=filename,
-                revision=target_model.get("revision") or None,
+                revision=_catalog_revision(download_repo_id, filename, target_model),
             )
 
             expected_name = basename_agnostic(target_model.get("local_path", "") or target_model.get("hf_path", "") or "model")

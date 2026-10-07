@@ -230,3 +230,39 @@ def test_worker_installs_only_after_validation(monkeypatch, hub_progress, tmp_pa
     assert target.read_bytes() == (cached.read_bytes() if valid else b"old model")
     assert bool(versions) == valid
     assert list(target.parent.iterdir()) == [target]
+
+
+QI2_REVISION = cc._CATALOG_REVISIONS["Comfy-Org/Qwen-Image-2.1"][0]
+
+
+@pytest.mark.parametrize("entry, revision", [
+    ({"version": "1.0"}, QI2_REVISION),
+    ({"version": "1.1"}, None),
+    ({"version": "1.0", "revision": "catalog"}, "catalog"),
+])
+def test_worker_downloads_the_pinned_catalog_revision(monkeypatch, hub_progress, tmp_path, entry, revision):
+    cached = tmp_path / "cache.safetensors"
+    cached.write_bytes(b"x" * 1024)
+    target = tmp_path / "qwen_image_2.1_vae_bf16.safetensors"
+    tasks = queue.Queue()
+    tasks.put(("MIUProject/VNCCS_v3.0", "vae", {
+        "hf_repo": "Comfy-Org/Qwen-Image-2.1",
+        "hf_path": "vae/qwen_image_2.1_vae_bf16.safetensors",
+        "local_path": "models/vae/qwen_image_2.1_vae_bf16.safetensors",
+        **entry,
+    }))
+    tasks.put(None)
+    monkeypatch.setattr(cc, "_DOWNLOAD_QUEUE", tasks)
+    monkeypatch.setattr(cc, "_resolve_model_download_path", lambda path: str(target))
+    monkeypatch.setattr(cc, "_validate_downloaded_model_file", lambda *args: None)
+    monkeypatch.setattr(cc, "update_installed_version", lambda *args: None)
+    requests = []
+
+    def transfer(*, repo_id, filename, revision, tqdm_class, token):
+        requests.append((repo_id, filename, revision, token))
+        return str(cached)
+
+    monkeypatch.setattr(cc, "hf_hub_download", transfer)
+    cc._download_worker_loop()
+    assert cc._DOWNLOAD_STATUS["vae"]["status"] == "success"
+    assert requests == [("Comfy-Org/Qwen-Image-2.1", "vae/qwen_image_2.1_vae_bf16.safetensors", revision, False)]
