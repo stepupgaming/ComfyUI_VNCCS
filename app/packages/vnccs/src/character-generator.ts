@@ -394,6 +394,17 @@ export function modelResolutionKey(state: NodeState): {
   return { kind, key: JSON.stringify([kind, type, model]) };
 }
 
+export type FaceDenoiseZone = "weak" | "optimal" | "excessive";
+
+/** The Emotion Strength bands: Anima keeps its likeness at more redraw than Illustrious. */
+export function faceDenoiseZone(value: number, mode: string): FaceDenoiseZone {
+  const anima = mode === "anima";
+  if (value < (anima ? 0.6 : 0.5)) {
+    return "weak";
+  }
+  return value <= (anima ? 0.75 : 0.65) ? "optimal" : "excessive";
+}
+
 export interface StageDef {
   key: string;
   label: string;

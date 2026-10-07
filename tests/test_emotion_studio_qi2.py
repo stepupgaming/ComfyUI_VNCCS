@@ -9,7 +9,6 @@ from nodes import emotion_generator_v2 as emotion
 
 
 ROOT = Path(__file__).resolve().parents[1]
-UI_SOURCE = (ROOT / "web" / "vnccs_emotion_v2.js").read_text(encoding="utf-8")
 
 
 def test_emotion_studio_builds_qi2_pipe_with_cache_and_viggle_state(monkeypatch):
@@ -40,17 +39,6 @@ def test_emotion_studio_builds_qi2_pipe_with_cache_and_viggle_state(monkeypatch)
         "auto_apply": True,
         "strength": 1.0,
     }]
-
-
-def test_emotion_studio_ui_exposes_qi2_model_cache_and_turbo_controls():
-    assert 'tabQi2.innerText = "Qwen Image 2.1"' in UI_SOURCE
-    assert 'tabQi2.onclick = () => setGenerationMode("qi2")' in UI_SOURCE
-    assert 'qi2CacheTitle.innerText = "Qwen Image 2.1 Cache"' in UI_SOURCE
-    assert '["auto", "gpu", "cpu", "off"]' in UI_SOURCE
-    assert '["default", "int8", "int4"]' in UI_SOURCE
-    assert 'state.gen.steps = 6;' in UI_SOURCE
-    assert 'state.gen.cfg = 1.0;' in UI_SOURCE
-    assert 'mode === "qi2" ? "QI2"' in UI_SOURCE
 
 
 def test_qi2_emotion_card_uses_natural_prompt_and_description_tags():

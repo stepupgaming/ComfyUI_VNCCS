@@ -3,6 +3,7 @@ import {
   applyProgressSnapshot,
   beginRegenerate,
   beginRun,
+  faceDenoiseZone,
   formatStageStatus,
   type GeneratorData,
   type GeneratorKind,
@@ -329,6 +330,33 @@ describe("Character Generator emotion settings", () => {
     expect(sync({ character: "", emotionPairs: [] })).toBe(true);
     expect(data.character_name).toBe("");
     expect(data.emotion_pairs).toEqual([]);
+  });
+
+  it("grades face denoise per family like the widget's Emotion Strength", () => {
+    const zones = (mode: string) =>
+      [0.49, 0.5, 0.65, 0.66, 0.59, 0.6, 0.75, 0.76].map((value) =>
+        faceDenoiseZone(value, mode)
+      );
+    expect(zones("illustrious")).toEqual([
+      "weak",
+      "optimal",
+      "optimal",
+      "excessive",
+      "optimal",
+      "optimal",
+      "excessive",
+      "excessive",
+    ]);
+    expect(zones("anima")).toEqual([
+      "weak",
+      "weak",
+      "optimal",
+      "optimal",
+      "weak",
+      "optimal",
+      "optimal",
+      "excessive",
+    ]);
   });
 });
 

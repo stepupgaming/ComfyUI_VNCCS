@@ -34,6 +34,31 @@ def test_packaged_catalog_is_unique_and_every_style_has_a_square_rgb_preview():
     assert catalog["default_style"] == "ghibli_miyazaki"
 
 
+def test_packaged_catalog_has_readable_character_focused_labels():
+    catalog = json.loads((ROOT / "character_template/character_styles.json").read_text())
+    labels = {style["label"] for group in catalog["groups"] for style in group["styles"]}
+    assert {
+        "Hayao Miyazaki / Studio Ghibli",
+        "Yoshiyuki Sadamoto",
+        "CLAMP",
+        "Fortiche / Arcane",
+        "Cartoon Saloon",
+        "Academic Realism",
+        "Shonen Anime",
+        "Shojo Anime",
+        "Seinen Anime",
+        "Josei Anime",
+        "1970s Anime",
+        "1980s Anime",
+        "1990s Anime",
+        "2000s Anime",
+        "2010s Anime",
+        "2020s Anime",
+    }.issubset(labels)
+    assert {"Marker Anime", "Brush Ink Anime", "Cubist Geometric"}.isdisjoint(labels)
+    assert catalog["aliases"]["clio_anime_style"] == "anime_style"
+
+
 def test_retired_styles_and_previews_are_removed_with_valid_workflow_fallbacks():
     catalog = json.loads((ROOT / "character_template/character_styles.json").read_text())
     styles = {s["id"] for g in catalog["groups"] for s in g["styles"]}
@@ -250,8 +275,6 @@ def test_flattening_keeps_opaque_rgb_pixels_and_matches_card_colors():
     background = library.flatten_style_preview(Image.new("RGBA", (32, 32), (255, 0, 0, 0)))
     assert background.getpixel((0, 0)) == (41, 32, 52)
     assert background.getpixel((31, 31)) == (23, 19, 31)
-    css = (ROOT / "web/vnccs_character_creator_v2.js").read_text()
-    assert "background: linear-gradient(145deg, #292034, #17131f)" in css
 
 
 @pytest.mark.parametrize("with_preview", [False, True])

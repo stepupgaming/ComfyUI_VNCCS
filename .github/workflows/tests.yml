@@ -32,5 +32,5 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Run widget tests
+      - name: Run canvas helper tests
         run: node --test tests/*.mjs

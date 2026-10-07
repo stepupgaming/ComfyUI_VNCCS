@@ -12,6 +12,7 @@ import {
   ResolutionScaleField,
   SegmentedField,
   SelectField,
+  SliderField,
   TextAreaField,
   TextField,
 } from "@workspace/core/components/common/form-fields";
@@ -37,6 +38,9 @@ import { Label } from "@workspace/ui/components/label";
 import { cn } from "@workspace/ui/lib/utils";
 import {
   booleanValue,
+  DEFAULT_GENERATOR_DATA,
+  type FaceDenoiseZone,
+  faceDenoiseZone,
   GENERATOR_TITLE,
   type GeneratorData,
   parseNumberField,
@@ -64,6 +68,13 @@ const HELP: Record<string, string> = {
   preset: "Strength preset for chroma/background removal.",
   use_sam3_details_recovery:
     "Uses Easy SAM3 to restore character details after background removal.",
+  face_denoise:
+    "Controls how strongly the face detailer redraws each emotion face. Low preserves more, high changes more.",
+  bbox_threshold: "Detection confidence threshold for the face bbox detector.",
+  bbox_dilation: "Pixel dilation applied around detected face bounding boxes.",
+  sam_dilation: "Pixel dilation applied to the SAM mask.",
+  sam_threshold: "SAM mask confidence threshold.",
+  sam_bbox_expansion: "Pixel expansion applied to the SAM bounding box.",
 };
 
 const TRANSIENT_SEEDVR = new Set(["queued", "downloading", "error"]);
@@ -263,18 +274,218 @@ function colorCorrectionOptions(
   return [...new Set([current, ...list].filter(Boolean).map(String))];
 }
 
+function sectionSetter(target: GeneratorHandle["target"]) {
+  return (name: string, key: string, value: unknown) =>
+    updateGenerator(target, (next) => next.set(name, key, value));
+}
+
+function BgRemoveBlock({ handle }: { handle: GeneratorHandle }) {
+  const { data, model, target } = handle;
+  const set = sectionSetter(target);
+  const bgRemove = section(data, "bg_remove");
+  return (
+    <Block title="BG Remove">
+      <SelectField
+        help={HELP.preset}
+        label="mode"
+        onChange={(value) => set("bg_remove", "preset", value)}
+        options={model.bgRemoveModes()}
+        value={String(bgRemove.preset || "")}
+      />
+      {model.isNativeBgRemove() ? null : (
+        <CheckField
+          checked={Boolean(bgRemove.use_sam3_details_recovery)}
+          help={HELP.use_sam3_details_recovery}
+          label="Use SAM3 Details Recovery"
+          onChange={(checked) =>
+            set("bg_remove", "use_sam3_details_recovery", checked)
+          }
+        />
+      )}
+    </Block>
+  );
+}
+
+const ZONE_BADGE: Record<
+  FaceDenoiseZone,
+  "secondary" | "success" | "destructive"
+> = {
+  weak: "secondary",
+  optimal: "success",
+  excessive: "destructive",
+};
+
+function FaceDenoiseField({
+  mode,
+  onChange,
+  value,
+}: {
+  mode: string;
+  onChange: (value: number) => void;
+  value: number;
+}) {
+  const zone = faceDenoiseZone(value, mode);
+  return (
+    <div className="flex flex-col gap-2">
+      <SliderField
+        format={(next) => next.toFixed(2)}
+        help={HELP.face_denoise}
+        label="face detailer denoise"
+        max={1}
+        min={0}
+        onChange={onChange}
+        step={0.01}
+        value={value}
+      />
+      <Badge variant={ZONE_BADGE[zone]}>{zone}</Badge>
+    </div>
+  );
+}
+
+/**
+ * The emotions generator never upscales: its panel holds the face pass
+ * settings for the Emotion Studio's family instead of pose and upscaler.
+ */
+function EmotionInlineSettings({
+  handle,
+  mode,
+}: {
+  handle: GeneratorHandle;
+  mode: string;
+}) {
+  const { data, target } = handle;
+  const set = sectionSetter(target);
+  const emotion = section(data, "emotion_generation");
+  const defaults = DEFAULT_GENERATOR_DATA.emotion_generation;
+  const count = Array.isArray(data.emotion_pairs)
+    ? data.emotion_pairs.length
+    : 0;
+  const faceNumber = (
+    key: string,
+    label: string,
+    min: number,
+    max: number,
+    step: number
+  ) => (
+    <NumberField
+      help={HELP[key]}
+      key={key}
+      label={label}
+      max={max}
+      min={min}
+      onCommit={(value) => set("emotion_generation", key, value)}
+      parse={(text) => clampNumber(text.replace(",", "."), min, max)}
+      step={step}
+      value={Number(emotion[key] ?? defaults[key]) || 0}
+    />
+  );
+  const denoise = Math.max(
+    0,
+    Math.min(1, Number(emotion.face_denoise ?? defaults.face_denoise))
+  );
+
+  return (
+    <div className="flex flex-col gap-3">
+      <Block title="Emotion Generation">
+        <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-sm">
+          <dt className="text-muted-foreground">character</dt>
+          <dd className="truncate">
+            {data.character_name || "Select a character"}
+          </dd>
+          <dt className="text-muted-foreground">steps</dt>
+          <dd>{count} costume / emotion pair(s)</dd>
+        </dl>
+      </Block>
+      {mode === "qi2" ? (
+        <>
+          <Block title="QI2 Face Generation">
+            <ResolutionScaleField
+              help={HELP.target_size}
+              label="resolution scale"
+              onChange={(size) =>
+                set("emotion_generation", "target_size", size)
+              }
+              value={emotion.target_size}
+            />
+          </Block>
+          <Block title="VNCCS BBox Extractor">
+            <div className="grid grid-cols-2 gap-3">
+              {faceNumber("bbox_threshold", "threshold", 0, 1, 0.01)}
+              {faceNumber("bbox_dilation", "dilation", 0, 1024, 1)}
+              {faceNumber("feather", "feather", 0, 1024, 1)}
+              {faceNumber("drop_size", "drop_size", 1, 4096, 1)}
+            </div>
+          </Block>
+        </>
+      ) : (
+        <>
+          <Block title="Emotion Strength">
+            <FaceDenoiseField
+              mode={mode}
+              onChange={(value) =>
+                set("emotion_generation", "face_denoise", value)
+              }
+              value={denoise}
+            />
+          </Block>
+          <Block title="Face Detailer">
+            {faceNumber(
+              "task_batch_size",
+              "task_batch_size (0 = auto)",
+              0,
+              32,
+              1
+            )}
+            <CheckField
+              checked={booleanValue(emotion.use_sam)}
+              label="Use SAM"
+              onChange={(checked) =>
+                set("emotion_generation", "use_sam", checked)
+              }
+            />
+            <div className="grid grid-cols-2 gap-3">
+              {faceNumber("bbox_threshold", "bbox_threshold", 0, 1, 0.01)}
+              {faceNumber("bbox_dilation", "bbox_dilation", 0, 128, 1)}
+              {faceNumber("sam_dilation", "sam_dilation", 0, 128, 1)}
+              {faceNumber("sam_threshold", "sam_threshold", 0, 1, 0.01)}
+              {faceNumber(
+                "sam_bbox_expansion",
+                "sam_bbox_expansion",
+                0,
+                128,
+                1
+              )}
+            </div>
+          </Block>
+        </>
+      )}
+      <BgRemoveBlock handle={handle} />
+    </div>
+  );
+}
+
 /** The generator's inline controls: pose resolution, upscaler and background removal. */
 export function GeneratorInlineSettings({
   handle,
+  sources,
 }: {
   handle: GeneratorHandle;
+  sources: GeneratorSources;
 }) {
   const schemas = useGeneratorStore((store) => store.schemas);
   const { data, model, target } = handle;
-  const set = (name: string, key: string, value: unknown) =>
-    updateGenerator(target, (next) => next.set(name, key, value));
+  if (target.kind === "emotions") {
+    return (
+      <EmotionInlineSettings
+        handle={handle}
+        mode={
+          sources.emotionMode || String(data.ui.resolution_model_kind || "")
+        }
+      />
+    );
+  }
+  const set = sectionSetter(target);
   const upscaler = section(data, "upscaler");
-  const bgRemove = section(data, "bg_remove");
   const clone = target.kind === "clone";
   const poseSection = model.poseTargetSection();
 
@@ -354,25 +565,7 @@ export function GeneratorInlineSettings({
           </>
         )}
       </Block>
-      <Block title="BG Remove">
-        <SelectField
-          help={HELP.preset}
-          label="mode"
-          onChange={(value) => set("bg_remove", "preset", value)}
-          options={model.bgRemoveModes()}
-          value={String(bgRemove.preset || "")}
-        />
-        {model.isNativeBgRemove() ? null : (
-          <CheckField
-            checked={Boolean(bgRemove.use_sam3_details_recovery)}
-            help={HELP.use_sam3_details_recovery}
-            label="Use SAM3 Details Recovery"
-            onChange={(checked) =>
-              set("bg_remove", "use_sam3_details_recovery", checked)
-            }
-          />
-        )}
-      </Block>
+      <BgRemoveBlock handle={handle} />
     </div>
   );
 }

@@ -968,113 +968,7 @@ class TestControlCenterFamilyState:
         assert _is_audio_vae_entry(entry) is True
 
 
-class TestControlCenterFrontendFamilies:
-    def test_frontend_has_family_tabs_and_kind_filters(self):
-        path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "web", "vnccs_control_center.js")
-        with open(path, "r", encoding="utf-8") as handle:
-            source = handle.read()
-
-        assert '{ kind: "QI2", label: "Qwen Image 2.1", defaultType: "unet", preferredTypes: ["unet", "custom"]' in source
-        assert '{ kind: "Klein9b", label: "Flux Klein9b", defaultType: "unet", preferredTypes: ["unet", "custom"]' in source
-        assert '{ kind: "MiniMaxH3", label: "MiniMax H3", defaultType: "unet", preferredTypes: ["unet", "custom"]' in source
-        assert "const preferred = this._familyDefinition(activeKind).preferredTypes;" in source
-        assert 'sync("audio_vae", "VAE"' in source
-        assert 'grid-template-columns: repeat(3, minmax(0, 1fr));' in source
-        assert 'button.onkeydown = event =>' in source
-        assert "const previousScrollTop = this.scrollArea.scrollTop;" in source
-        assert 'const contextType = this._familyDefinition().defaultType;' in source
-        assert '.vnccs-cc-twocol-left > .vnccs-cc-model-card' in source
-        assert 'this.scrollArea.appendChild(this._renderFamilyTabs())' in source
-        assert "_exactKind(entry, kind = this._selectedKind())" in source
-        assert "entryKind && kind && entryKind.toLowerCase() === kind.toLowerCase()" in source
-        assert "!entry.custom && !this._isTurboLora(entry) && this._exactKind(entry, selectedKind)" in source
-        assert "if (!this._exactKind(entry, selectedKind)) continue;" in source
-        assert "(this._isHelperLora(entry) || this._sameKind(entry, selectedKind))" not in source
-
-    def test_download_errors_are_visible_to_desktop_users(self):
-        path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "web", "vnccs_control_center.js")
-        with open(path, "r", encoding="utf-8") as handle:
-            source = handle.read()
-
-        download_source = source.split("async _downloadEntry(cat, entry)", 1)[1].split(
-            "async _downloadAllMissing()", 1
-        )[0]
-        assert "if (!r.ok || d.error)" in download_source
-        assert "this.showMessage(message, true);" in download_source
-        assert "detail: { repo_id: repoId }" in download_source
-
-    def test_missing_dependencies_install_through_comfyui_manager(self):
-        path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "web", "vnccs_control_center.js")
-        with open(path, "r", encoding="utf-8") as handle:
-            source = handle.read()
-
-        assert 'api.fetchApi("/manager/queue/install"' in source
-        assert 'api.fetchApi("/manager/queue/start"' in source
-        assert 'api.fetchApi("/v2/manager/queue/task"' in source
-        assert 'api.fetchApi("/v2/manager/queue/start"' in source
-        assert 'api.addEventListener("cm-task-completed"' in source
-        assert 'api.addEventListener("cm-queue-status"' in source
-        assert 'api.fetchApi("/manager/reboot"' in source
-        assert 'api.fetchApi("/v2/manager/reboot"' in source
-        assert 'api.fetchApi("/vnccs/manager/install_policy"' in source
-        assert 'api.fetchApi("/vnccs/manager/enable_personal_cloud"' in source
-        assert 'confirmation: "enable_personal_cloud"' in source
-        assert '"X-VNCCS-CSRF": "1"' in source
-        assert 'sessionStore.setItem(PENDING_DEPENDENCY_INSTALLS_KEY' in source
-        assert 'sessionStore.removeItem(PENDING_DEPENDENCY_INSTALLS_KEY)' in source
-        assert "window.location.reload();" in source
-        assert 'this._btn("Enable & restart"' in source
-        assert "security_level will not be changed" in source
-        assert 'selected_version: "latest"' in source
-        assert 'kind: "install"' in source
-        assert "skip_post_install: false" in source
-        assert 'this._btn("Install all"' in source
-        assert 'this._btn("Restart server"' in source
-        assert "this._dependencyRestartRequired && this._dependencyInstallTasks.size === 0" in source
-        assert 'info.status === "unsupported"' in source
-        assert 'info.status !== "unsupported"' in source
-        assert source.index('api.fetchApi("/manager/queue/install"') < source.index(
-            'api.fetchApi("/v2/manager/queue/task"'
-        )
-        queue_source = source.split("async _queueDependencyInstall", 1)[1].split(
-            "async _installDependency", 1
-        )[0]
-        assert queue_source.index("this._dependencyInstallTasks.set(uiId, tracked)") < queue_source.index(
-            "await this._queueLegacyDependencyInstall(item, uiId)"
-        )
-        assert "this._dependencyInstallTasks.delete(uiId);" in queue_source
-        assert "git clone" not in source.split("async _queueDependencyInstall", 1)[1].split(
-            "_handleManagerTaskCompleted", 1
-        )[0]
-
-    def test_custom_model_inputs_follow_the_active_custom_tab(self):
-        path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "web", "vnccs_control_center.js")
-        with open(path, "r", encoding="utf-8") as handle:
-            source = handle.read()
-
-        sync_source = source.split("_syncCustomModelInput()", 1)[1].split("_setSelectedType", 1)[0]
-        assert "this.config ? this._getSelectedType() : this._getStoredSelectedType()" in sync_source
-        assert 'const isCustom = selectedType === "custom"' in sync_source
-        assert 'sync("model", "MODEL"' in sync_source
-        assert 'sync("clip", "CLIP"' in sync_source
-        assert 'sync("vae", "VAE"' in sync_source
-        assert source.count("this._syncCustomModelInput();") >= 7
-
-class TestClothesPreviewFrontendContract:
-    def test_custom_preview_never_submits_graph_execution(self):
-        path = os.path.join(
-            os.path.dirname(os.path.dirname(__file__)),
-            "web",
-            "vnccs_clothes_designer.js",
-        )
-        with open(path, "r", encoding="utf-8") as handle:
-            source = handle.read()
-
-        assert 'api.fetchApi("/vnccs/control_center/clothes_preview"' in source
-        assert "control_center_id: String(upstream.id)" in source
-        assert "queueConnectedPreview" not in source
-        assert "app.queuePrompt(0, 1, [targetId])" not in source
-
+class TestClothesDesignerNodeContract:
     def test_clothes_designer_is_partial_execution_output(self):
         path = os.path.join(
             os.path.dirname(os.path.dirname(__file__)),
@@ -1086,22 +980,6 @@ class TestClothesPreviewFrontendContract:
 
         class_source = source.split("class ClothesDesigner:", 1)[1]
         assert "OUTPUT_NODE = True" in class_source
-
-    def test_generated_preview_preserves_cache_input_signature(self):
-        path = os.path.join(
-            os.path.dirname(os.path.dirname(__file__)),
-            "web",
-            "vnccs_clothes_designer.js",
-        )
-        with open(path, "r", encoding="utf-8") as handle:
-            source = handle.read()
-
-        assert 'if (url.includes("force_cache=true")) return;' in source
-        force_cache_branch = source.split("if (forceCache) {", 1)[1].split("} else {", 1)[0]
-        assert "selected_preview_sprite = null" not in force_cache_branch
-        preview_handler = source.split("btnGen.onclick = async () => {", 1)[1].split("els.btnGen = btnGen;", 1)[0]
-        assert "selected_preview_sprite = null" not in preview_handler
-        assert "clothes_state: state" in preview_handler
 
 
 # ── custom LoRA helpers ──────────────────────────────────────────────────────
