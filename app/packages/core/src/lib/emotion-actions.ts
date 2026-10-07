@@ -1,5 +1,6 @@
 import {
   generatorData,
+  generatorFamily,
   prepareGeneratorRun,
   syncGenerator,
 } from "@workspace/core/lib/generator-actions";
@@ -243,7 +244,11 @@ export async function queueEmotions(): Promise<boolean> {
     generator: { widgetData: prepareGeneratorRun(EMOTIONS_GENERATOR) },
   });
   try {
-    await runPrompt(`Emotions · ${model.state.character}`, prompt);
+    await runPrompt(
+      `Emotions · ${model.state.character}`,
+      prompt,
+      generatorFamily(EMOTIONS_GENERATOR)
+    );
     return true;
   } catch (error) {
     toast.error("Run failed", { description: errorText(error) });

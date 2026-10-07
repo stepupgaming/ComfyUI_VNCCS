@@ -80,6 +80,13 @@ def _forget_generator_context(unique_id, scope=None):
         _LIVE_GENERATOR_CONTEXTS.pop(_generator_context_key(unique_id, scope), None)
 
 
+def forget_idle_generator_contexts():
+    """Drop the pipes Regenerate keeps, except those of runs still executing."""
+    with _lock:
+        for key in [key for key in _LIVE_GENERATOR_CONTEXTS if key not in _execution_locks]:
+            del _LIVE_GENERATOR_CONTEXTS[key]
+
+
 def _generator_context_key(unique_id, scope=None):
     node_id = str(unique_id or "").strip()
     return (str(scope), node_id) if scope else node_id

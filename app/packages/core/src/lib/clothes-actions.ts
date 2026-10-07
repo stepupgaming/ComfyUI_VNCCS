@@ -3,11 +3,13 @@ import { currentPoseData } from "@workspace/core/hooks/use-pose-studio";
 import {
   type GeneratorSources,
   generatorData,
+  generatorFamily,
   prepareGeneratorRun,
   syncGenerator,
 } from "@workspace/core/lib/generator-actions";
 import { createSpritePreview } from "@workspace/core/lib/images";
 import { runPrompt } from "@workspace/core/lib/jobs";
+import { modelMemory } from "@workspace/core/lib/model-memory";
 import { studioHttp } from "@workspace/core/lib/studio";
 import {
   mirrorClothesSnapshot,
@@ -36,6 +38,7 @@ import {
   wizardFailure,
 } from "@workspace/vnccs/creator";
 import { buildClothesPrompt, CLOTHES_IDS } from "@workspace/vnccs/graphs";
+import { WIZARD_FAMILY } from "@workspace/vnccs/model-memory";
 import { toast } from "sonner";
 
 /**
@@ -68,6 +71,7 @@ export function clothesSession(): ClothesSession {
       }
     },
     onChange: mirrorClothesSnapshot,
+    withModels: (family, task) => modelMemory.run(family, task),
   });
   return session;
 }
@@ -145,7 +149,9 @@ export async function fillCostumeFields(
       return true;
     }
     onPhase("thinking");
-    await designer.runWizard(ticket, description);
+    await modelMemory.run(WIZARD_FAMILY, () =>
+      designer.runWizard(ticket, description)
+    );
     return true;
   } catch (error) {
     if (!isCurrent()) {
@@ -263,7 +269,8 @@ export async function queueClothesSheets(
   try {
     await runPrompt(
       `Clothes sheets · ${state.character} · ${state.costume}`,
-      prompt
+      prompt,
+      generatorFamily(CLOTHES_GENERATOR)
     );
     return true;
   } catch (error) {

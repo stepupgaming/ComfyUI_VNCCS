@@ -3,6 +3,7 @@ import {
   type ClothesContext,
   type ClothesModel,
   type ClothesState,
+  clothesModelKind,
   displayCostumes,
   initializeClothesState,
   isEditableCostume,
@@ -248,6 +249,8 @@ export interface ClothesSessionOptions {
   now?: () => number;
   onChange?: (snapshot: ClothesSnapshot) => void;
   random?: () => number;
+  /** Run work that loads `family`'s models (the app's model lifetime policy). */
+  withModels?: <T>(family: string, task: () => Promise<T>) => Promise<T>;
 }
 
 const COSTUME_REQUIRED =
@@ -897,10 +900,14 @@ export class ClothesSession {
         return;
       }
       const { nodeState, repoId } = this.options.controlCenter();
-      const image = await generateClothesPreview(
-        this.http(),
-        clothesPreviewPayload(state, nodeState, repoId)
-      );
+      const render = () =>
+        generateClothesPreview(
+          this.http(),
+          clothesPreviewPayload(state, nodeState, repoId)
+        );
+      const family = clothesModelKind(nodeState).toLowerCase();
+      const image = await (this.options.withModels?.(family, render) ??
+        render());
       if (isCurrent() && image) {
         this.setUi({ generatedImage: image });
       }

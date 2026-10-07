@@ -1260,6 +1260,13 @@ def _cached_lora_file(full_path, signature):
     return comfy.utils.load_torch_file(full_path, safe_load=True, return_metadata=True)
 
 
+def release_model_assets():
+    """Forget the cached checkpoints and LoRA files so their memory can be freed."""
+    with _MODEL_ASSET_LOCK:
+        _MODEL_ASSET_CACHE.clear()
+        _cached_lora_file.cache_clear()
+
+
 def _load_lora_file(full_path):
     signature = _model_file_signature(full_path)
     if signature is None:

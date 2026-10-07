@@ -3,11 +3,13 @@ import { currentPoseData } from "@workspace/core/hooks/use-pose-studio";
 import {
   type GeneratorSources,
   generatorData,
+  generatorFamily,
   prepareGeneratorRun,
   syncGenerator,
 } from "@workspace/core/lib/generator-actions";
 import { createSpritePreview } from "@workspace/core/lib/images";
 import { runPrompt } from "@workspace/core/lib/jobs";
+import { modelMemory } from "@workspace/core/lib/model-memory";
 import { studioHttp } from "@workspace/core/lib/studio";
 import {
   clonerContext,
@@ -51,6 +53,7 @@ import {
   buildCharacterClonerPrompt,
   CLONER_IDS,
 } from "@workspace/vnccs/graphs";
+import { WIZARD_FAMILY } from "@workspace/vnccs/model-memory";
 import type { SpritePreviewNavigator } from "@workspace/vnccs/sprite-preview";
 import { toast } from "sonner";
 
@@ -373,10 +376,8 @@ export async function analyzeSource(gate: QwenModelGate): Promise<void> {
       return;
     }
     store().set({ analysis: "analyzing" });
-    const data = await analyzeClonerSource(
-      studioHttp(),
-      image,
-      CLONER_IDS.source
+    const data = await modelMemory.run(WIZARD_FAMILY, () =>
+      analyzeClonerSource(studioHttp(), image, CLONER_IDS.source)
     );
     if (isCurrent()) {
       store().update((model) => model.applyAnalysis(data));
@@ -515,7 +516,11 @@ export async function queueCloneSheets(
     generator: { widgetData: prepareGeneratorRun(CLONE_GENERATOR) },
   });
   try {
-    await runPrompt(`Clone sheets · ${state.character}`, prompt);
+    await runPrompt(
+      `Clone sheets · ${state.character}`,
+      prompt,
+      generatorFamily(CLONE_GENERATOR)
+    );
     return true;
   } catch (error) {
     toast.error("Run failed", { description: errorText(error) });

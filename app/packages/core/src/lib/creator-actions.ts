@@ -2,11 +2,13 @@ import { currentPoseData } from "@workspace/core/hooks/use-pose-studio";
 import {
   type GeneratorSources,
   generatorData,
+  generatorFamily,
   prepareGeneratorRun,
   syncGenerator,
 } from "@workspace/core/lib/generator-actions";
 import { prefetchImage, probeImage } from "@workspace/core/lib/images";
 import { runPrompt } from "@workspace/core/lib/jobs";
+import { modelMemory } from "@workspace/core/lib/model-memory";
 import { studioHttp } from "@workspace/core/lib/studio";
 import { useControlCenterStore } from "@workspace/core/stores/control-center-store";
 import {
@@ -52,6 +54,7 @@ import {
   buildCharacterCreatorPrompt,
   CREATOR_IDS,
 } from "@workspace/vnccs/graphs";
+import { WIZARD_FAMILY } from "@workspace/vnccs/model-memory";
 import {
   deleteUserStyle,
   generateStylePreview,
@@ -325,7 +328,9 @@ export async function generateCreatorPreview(): Promise<void> {
     isCurrentRequest() && currentCharacter() === character;
   store().set({ previewRunning: true });
   try {
-    const image = await generatePreview(studioHttp(), model.previewPayload());
+    const image = await modelMemory.run(model.mode(), () =>
+      generatePreview(studioHttp(), model.previewPayload())
+    );
     if (isCurrent() && image) {
       store().setPreview({ loading: false, message: "", url: image });
       store().update(
@@ -430,7 +435,11 @@ export async function queueCharacterSheets(
     generator: { widgetData: prepareGeneratorRun(STEP1_GENERATOR) },
   });
   try {
-    await runPrompt(`Character sheets · ${creator.character}`, prompt);
+    await runPrompt(
+      `Character sheets · ${creator.character}`,
+      prompt,
+      generatorFamily(STEP1_GENERATOR)
+    );
     return true;
   } catch (error) {
     toast.error("Run failed", { description: errorText(error) });
@@ -442,10 +451,8 @@ export async function queueCharacterSheets(
 export async function runWizard(description: string): Promise<boolean> {
   const character = currentCharacter();
   const isCurrentRequest = beginWizardRequest();
-  const data = await runCharacterWizard(
-    studioHttp(),
-    description,
-    CREATOR_IDS.source
+  const data = await modelMemory.run(WIZARD_FAMILY, () =>
+    runCharacterWizard(studioHttp(), description, CREATOR_IDS.source)
   );
   if (!isCurrentRequest() || currentCharacter() !== character) {
     return false;
@@ -559,13 +566,15 @@ export async function renderStylePreview(styleId: string): Promise<boolean> {
 
   report("queued");
   try {
-    const image = await generateStylePreview(
-      studioHttp(),
-      stylePreviewRequest(
-        styleId,
-        model.previewPayload(),
-        STYLE_PREVIEW_NODE_ID,
-        requestId
+    const image = await modelMemory.run(model.mode(), () =>
+      generateStylePreview(
+        studioHttp(),
+        stylePreviewRequest(
+          styleId,
+          model.previewPayload(),
+          STYLE_PREVIEW_NODE_ID,
+          requestId
+        )
       )
     );
     if (!isCurrent()) {

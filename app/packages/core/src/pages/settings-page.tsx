@@ -1,8 +1,10 @@
 "use client";
 
+import { SelectField } from "@workspace/core/components/common/form-fields";
 import { Page } from "@workspace/core/components/common/page";
 import { useRuntimeControl } from "@workspace/core/hooks/use-runtime-control";
 import { formatGiB } from "@workspace/core/lib/format";
+import { modelMemory } from "@workspace/core/lib/model-memory";
 import { useConnectionStore } from "@workspace/core/stores/connection-store";
 import { useSettingsStore } from "@workspace/core/stores/settings-store";
 import { Badge } from "@workspace/ui/components/badge";
@@ -18,8 +20,9 @@ import { Input } from "@workspace/ui/components/input";
 import { Label } from "@workspace/ui/components/label";
 import { Switch } from "@workspace/ui/components/switch";
 import { DEFAULT_COMFY_URL } from "@workspace/vnccs/http";
-import { Play, Square } from "lucide-react";
+import { Eraser, Loader2, Play, Square } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
+import { toast } from "sonner";
 
 const DEV_ORIGIN = "http://localhost:1420";
 
@@ -196,6 +199,88 @@ function ManagedRuntimeCard() {
   );
 }
 
+const IDLE_CHOICES = [
+  { label: "Never", value: "0" },
+  { label: "After 1 minute", value: "1" },
+  { label: "After 2 minutes", value: "2" },
+  { label: "After 5 minutes", value: "5" },
+  { label: "After 10 minutes", value: "10" },
+  { label: "After 15 minutes", value: "15" },
+  { label: "After 30 minutes", value: "30" },
+  { label: "After 1 hour", value: "60" },
+];
+
+function ModelMemoryCard() {
+  const gpuMinutes = useSettingsStore((state) => state.gpuIdleMinutes);
+  const allMinutes = useSettingsStore((state) => state.memoryIdleMinutes);
+  const setGpuMinutes = useSettingsStore((state) => state.setGpuIdleMinutes);
+  const setAllMinutes = useSettingsStore((state) => state.setMemoryIdleMinutes);
+  const system = useConnectionStore((state) => state.system);
+  const [releasing, setReleasing] = useState(false);
+
+  const releaseNow = async () => {
+    setReleasing(true);
+    try {
+      if (await modelMemory.releaseAll()) {
+        toast.success("Models released");
+      } else {
+        toast.error("Could not release models", {
+          description: "ComfyUI is offline or still generating.",
+        });
+      }
+    } finally {
+      setReleasing(false);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Model memory</CardTitle>
+        <CardDescription>
+          The studio frees the previous model family before loading another,
+          frees everything when the window closes, and releases models after it
+          has been idle. Freeing VRAM keeps RAM copies so the next preview and
+          Regenerate start quickly; freeing all memory also ends Regenerate for
+          earlier runs.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-4">
+        <div className="grid gap-4 sm:grid-cols-2">
+          <SelectField
+            label="Free VRAM when idle"
+            onChange={(value) => setGpuMinutes(Number(value))}
+            options={IDLE_CHOICES}
+            value={String(gpuMinutes)}
+          />
+          <SelectField
+            label="Free all model memory when idle"
+            onChange={(value) => setAllMinutes(Number(value))}
+            options={IDLE_CHOICES}
+            value={String(allMinutes)}
+          />
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <Button disabled={releasing} onClick={releaseNow} variant="outline">
+            {releasing ? <Loader2 className="animate-spin" /> : <Eraser />}
+            Free memory now
+          </Button>
+          {system ? (
+            <span className="text-muted-foreground text-sm">
+              {system.devices.map(
+                (device) =>
+                  `VRAM ${formatGiB(device.vram_total - device.vram_free)} of ${formatGiB(device.vram_total)} in use · `
+              )}
+              RAM {formatGiB(system.system.ram_total - system.system.ram_free)}{" "}
+              of {formatGiB(system.system.ram_total)} in use
+            </span>
+          ) : null}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 function BrowserRuntimeCard() {
   return (
     <Card>
@@ -221,6 +306,7 @@ export function SettingsPage() {
   return (
     <Page className="max-w-4xl">
       <ConnectionCard />
+      <ModelMemoryCard />
       {available ? <ManagedRuntimeCard /> : <BrowserRuntimeCard />}
     </Page>
   );

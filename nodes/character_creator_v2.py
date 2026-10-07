@@ -128,6 +128,13 @@ PREVIEW_CACHE = {
     "loras": {}       # name -> tensor_dict
 }
 
+
+def release_preview_cache():
+    """Drop the preview's models and LoRA tensors so their memory can be freed."""
+    PREVIEW_CACHE["asset_obj"] = None
+    PREVIEW_CACHE["asset_key"] = None
+    PREVIEW_CACHE["loras"].clear()
+
 ILLUSTRIOUS_DEFAULTS = {
     "generation_mode": "illustrious",
     "target_size": 1024,
@@ -2016,14 +2023,8 @@ class CharacterCreatorV2:
         return json.dumps([file_fingerprint(path) for path in paths])
 
     def process(self, widget_data="{}", unique_id=None):
-        # Clear Preview Cache to free memory for workflow run
-        global PREVIEW_CACHE
-        if PREVIEW_CACHE["asset_obj"]:
-            # Explicitly delete references to help GC
-            del PREVIEW_CACHE["asset_obj"]
-            PREVIEW_CACHE["asset_obj"] = None
-        PREVIEW_CACHE["asset_key"] = None
-        PREVIEW_CACHE["loras"].clear()
+        # Free the preview's models for the workflow run.
+        release_preview_cache()
 
         try:
             data = json.loads(widget_data)

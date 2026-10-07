@@ -1,5 +1,6 @@
 "use client";
 
+import { modelMemory } from "@workspace/core/lib/model-memory";
 import { useConnectionStore } from "@workspace/core/stores/connection-store";
 import { useJobStore } from "@workspace/core/stores/job-store";
 import { usePoseStudioStore } from "@workspace/core/stores/pose-studio-store";
@@ -145,6 +146,8 @@ function PoseStudioFrame({
         store.updateHost({ loaded: true });
       } else if (message.type === "state") {
         store.setPoseData(nodeId, message.poseData);
+        // Pose Studio loads SAM 3D Body and BiRefNet on its own, outside studio jobs.
+        modelMemory.touch();
       } else if (message.type === "status") {
         store.updateHost({ ready: message.ready });
       } else {

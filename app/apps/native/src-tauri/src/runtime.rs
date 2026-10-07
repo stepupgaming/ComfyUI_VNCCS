@@ -88,6 +88,40 @@ fn kill_tree(process: &mut Child) {
   let _ = process.wait();
 }
 
+/// Put the app in a job Windows terminates when the app's last handle closes,
+/// so a runtime it started (and the interpreter the venv launcher spawns)
+/// cannot outlive a crash or a forced kill and keep models loaded.
+#[cfg(windows)]
+fn end_children_with_app() {
+  use std::sync::Once;
+  use windows_sys::Win32::System::JobObjects::{
+    AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+    SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+  };
+  use windows_sys::Win32::System::Threading::GetCurrentProcess;
+
+  static JOB: Once = Once::new();
+  JOB.call_once(|| unsafe {
+    let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+    if job.is_null() {
+      return;
+    }
+    let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    let configured = SetInformationJobObject(
+      job,
+      JobObjectExtendedLimitInformation,
+      &limits as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION as *const std::ffi::c_void,
+      std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+    );
+    // The job handle is never closed: it must live exactly as long as the app.
+    if configured != 0 {
+      AssignProcessToJobObject(job, GetCurrentProcess());
+    }
+  });
+}
+
 #[tauri::command]
 pub fn runtime_status(state: tauri::State<'_, RuntimeState>) -> RuntimeStatus {
   let mut child = state.child.lock().unwrap();
@@ -109,6 +143,8 @@ pub fn runtime_start(
   let mut child = state.child.lock().unwrap();
   refresh(&mut child);
   if child.is_none() {
+    #[cfg(windows)]
+    end_children_with_app();
     let mut command = Command::new(python_for(&root));
     command
       .current_dir(&root)

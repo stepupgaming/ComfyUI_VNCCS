@@ -211,3 +211,18 @@ def test_lora_weights_reuse_and_file_replacement(monkeypatch, tmp_path):
     assert cc._load_lora_file(str(path)) is not first
     assert len(calls) == 2
     cc._cached_lora_file.cache_clear()
+
+
+def test_release_model_assets_forgets_checkpoints_and_lora_files(monkeypatch, tmp_path):
+    monkeypatch.setattr(cc, "_MODEL_ASSET_CACHE", {})
+    path = tmp_path / "model"
+    path.write_bytes(b"weights")
+    cc._cached_model_asset("model", (str(path),), (), object)
+    lora = tmp_path / "adapter.safetensors"
+    lora.write_bytes(b"lora")
+    monkeypatch.setattr(cc.comfy.utils, "load_torch_file", lambda name, **kwargs: ({}, {}), raising=False)
+    cc._load_lora_file(str(lora))
+    assert cc._MODEL_ASSET_CACHE and cc._cached_lora_file.cache_info().currsize == 1
+    cc.release_model_assets()
+    assert cc._MODEL_ASSET_CACHE == {}
+    assert cc._cached_lora_file.cache_info().currsize == 0

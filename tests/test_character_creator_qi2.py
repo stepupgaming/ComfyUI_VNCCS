@@ -57,6 +57,15 @@ def test_qi2_preview_cache_never_reuses_text_encoder(monkeypatch):
     assert fresh_clip.clone_calls == 0
 
 
+def test_release_preview_cache_forgets_models_and_loras(monkeypatch):
+    monkeypatch.setitem(creator.PREVIEW_CACHE, "loras", {"style": object()})
+    creator.PREVIEW_CACHE.update({"asset_key": ("qi2",), "asset_obj": (object(), None, object())})
+    creator.release_preview_cache()
+    assert creator.PREVIEW_CACHE["asset_key"] is None
+    assert creator.PREVIEW_CACHE["asset_obj"] is None
+    assert creator.PREVIEW_CACHE["loras"] == {}
+
+
 def test_qi2_settings_normalize_cache_and_turbo_defaults():
     normal = creator.normalize_gen_settings({"generation_mode": "qi2"})
     assert normal["steps"] == 25

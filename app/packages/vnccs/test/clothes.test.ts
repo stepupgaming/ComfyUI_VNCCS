@@ -126,6 +126,7 @@ interface HarnessOptions {
   kind?: string;
   saved?: object;
   spriteCount?: number;
+  withModels?: <T>(family: string, task: () => Promise<T>) => Promise<T>;
 }
 
 function harness(options: HarnessOptions = {}) {
@@ -160,6 +161,7 @@ function harness(options: HarnessOptions = {}) {
     notify: (title, message, level) => notices.push({ title, message, level }),
     now: () => 100,
     random: () => 0.5,
+    withModels: options.withModels,
   });
   const saved = options.saved ?? { character: "Alice", costume: "Dress" };
   const sent = (path: string) =>
@@ -788,6 +790,27 @@ describe("clothes session preview", () => {
     expect(h.session.ui.generatedImage).toBe("data:image/png;base64,QUJD");
     expect(h.session.ui.previewGenerated).toBe(true);
     expect(h.session.ui.previewRunning).toBe(false);
+  });
+
+  it("renders inside the model lifetime policy for the Control Center family", async () => {
+    const entered: { family: string; renderedBefore: number }[] = [];
+    let h: ReturnType<typeof harness> | null = null;
+    h = harness({
+      kind: "MiniMaxH3",
+      withModels: (family, task) => {
+        entered.push({
+          family,
+          renderedBefore:
+            h?.sent("/vnccs/control_center/clothes_preview").length ?? -1,
+        });
+        return task();
+      },
+    });
+    await h.start();
+    await h.session.generatePreview();
+    expect(entered).toEqual([{ family: "minimaxh3", renderedBefore: 0 }]);
+    expect(h.sent("/vnccs/control_center/clothes_preview")).toHaveLength(1);
+    expect(h.session.ui.generatedImage).toBe("data:image/png;base64,QUJD");
   });
 
   it("rolls a random seed before rendering", async () => {

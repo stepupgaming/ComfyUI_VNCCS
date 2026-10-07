@@ -7,6 +7,7 @@ import { PoseStudioHost } from "@workspace/core/components/pose-studio/pose-stud
 import type { LinkComponent } from "@workspace/core/config/navigation";
 import { useConnectionMonitor } from "@workspace/core/hooks/use-connection-monitor";
 import { useCatalog } from "@workspace/core/hooks/use-control-center";
+import { useModelMemory } from "@workspace/core/hooks/use-model-memory";
 import { useRuntimeAutostart } from "@workspace/core/hooks/use-runtime-autostart";
 import { ThemeProvider } from "@workspace/core/providers/theme-provider";
 import {
@@ -26,6 +27,7 @@ interface AppLayoutProps {
 function BackgroundServices() {
   useConnectionMonitor();
   useRuntimeAutostart();
+  useModelMemory();
   useCatalog();
   return null;
 }

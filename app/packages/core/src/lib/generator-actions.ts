@@ -1,3 +1,4 @@
+import { modelMemory } from "@workspace/core/lib/model-memory";
 import { studioHttp } from "@workspace/core/lib/studio";
 import {
   type GeneratorTarget,
@@ -90,6 +91,11 @@ export function generatorData(target: GeneratorTarget): GeneratorData {
 
 export function generatorScope(target: GeneratorTarget): string {
   return progressScope(store().workflowId, target.kind, target.nodeId);
+}
+
+/** The model family the generator follows (synced from the Control Center or Emotion Studio). */
+export function generatorFamily(target: GeneratorTarget): string {
+  return String(generatorData(target).ui.resolution_model_kind ?? "");
 }
 
 function stageInfo(target: GeneratorTarget, data: GeneratorData) {
@@ -373,13 +379,15 @@ export async function regenerateStage(
   const isPending = () =>
     store().views[key]?.regenerate?.requestId === requestId;
   try {
-    await requestRegenerate(studioHttp(), {
-      data: regenerateData(data, { imageIndex, requestId, scope, stage }),
-      imageIndex,
-      kind: target.kind,
-      nodeId: target.nodeId,
-      stage,
-    });
+    await modelMemory.run(generatorFamily(target), () =>
+      requestRegenerate(studioHttp(), {
+        data: regenerateData(data, { imageIndex, requestId, scope, stage }),
+        imageIndex,
+        kind: target.kind,
+        nodeId: target.nodeId,
+        stage,
+      })
+    );
     const view = store().views[key];
     if (view && isPending()) {
       store().setView(key, { ...view, regenerate: null });
