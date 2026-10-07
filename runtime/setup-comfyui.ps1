@@ -37,22 +37,29 @@ $link = Join-Path $nodes "ComfyUI_VNCCS"
 if (-not (Test-Path $link)) {
     cmd /c mklink /J $link $repo | Out-Null
 }
-$dependencies = @(
-    "AHEKOT/ComfyUI_VNCCS_Utils",
-    "ltdrdata/ComfyUI-Impact-Pack",
-    "ltdrdata/ComfyUI-Impact-Subpack",
-    "yolain/ComfyUI-Easy-Sam3",
-    "city96/ComfyUI-GGUF"
-)
-foreach ($dependency in $dependencies) {
-    $target = Join-Path $nodes ($dependency.Split("/")[1])
+# Pinned to the commits VNCCS Studio was tested against: the app calls Pose
+# Studio and helper routes from these packs, so their HEAD can break it.
+$dependencies = [ordered]@{
+    "AHEKOT/ComfyUI_VNCCS_Utils"     = "eedaed79a7c42d2570d832cc5d2e0a2da5ab022d"
+    "ltdrdata/ComfyUI-Impact-Pack"    = "429d0159ad429e64d2b3916e6e7be9c22d025c3c"
+    "ltdrdata/ComfyUI-Impact-Subpack" = "50c7b71a6a224734cc9b21963c6d1926816a97f1"
+    "yolain/ComfyUI-Easy-Sam3"        = "88fe578a1a5e03d95281197303d5d3a73fd5a089"
+    "city96/ComfyUI-GGUF"             = "6ea2651e7df66d7585f6ffee804b20e92fb38b8a"
+}
+foreach ($dependency in $dependencies.GetEnumerator()) {
+    $target = Join-Path $nodes ($dependency.Key.Split("/")[1])
     if (-not (Test-Path $target)) {
-        git clone --depth 1 "https://github.com/$dependency.git" $target
+        git clone --filter=blob:none "https://github.com/$($dependency.Key).git" $target
+    }
+    if ((git -C $target rev-parse HEAD) -ne $dependency.Value) {
+        git -C $target fetch --depth 1 origin $dependency.Value
+        git -C $target checkout --detach $dependency.Value
+        if ($LASTEXITCODE -ne 0) { throw "Could not pin $($dependency.Key) to $($dependency.Value)" }
     }
 }
 
 # torch stays pinned to the cu130 build above; llama-cpp-python needs the cu130 Qwen35ChatHandler fork.
-$requirements = @(Join-Path $repo "requirements.txt") + ($dependencies | ForEach-Object { Join-Path $nodes "$($_.Split('/')[1])\requirements.txt" })
+$requirements = @(Join-Path $repo "requirements.txt") + ($dependencies.Keys | ForEach-Object { Join-Path $nodes "$($_.Split('/')[1])\requirements.txt" })
 $combined = Join-Path $Root "combined-requirements.txt"
 $requirements | Where-Object { Test-Path $_ } | ForEach-Object { Get-Content $_ } |
     Where-Object { $_ -and $_ -notmatch '^\s*#' -and $_ -notmatch '^llama-cpp-python' -and $_ -notmatch '^(torch|torchvision)\s*$' } |
