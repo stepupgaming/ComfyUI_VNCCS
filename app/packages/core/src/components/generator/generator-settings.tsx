@@ -75,6 +75,14 @@ const HELP: Record<string, string> = {
   sam_dilation: "Pixel dilation applied to the SAM mask.",
   sam_threshold: "SAM mask confidence threshold.",
   sam_bbox_expansion: "Pixel expansion applied to the SAM bounding box.",
+  qi2_target_size:
+    "Output area of the QI2 upscaler, from 1.0 to 4.0 megapixels. QI2 works best up to 4 MP.",
+  qi2_pass:
+    "Full repaint regenerates the image at the new size. Detail pass keeps the source and redraws only up to the denoise strength.",
+  qi2_detail_denoise:
+    "How much of the source the detail pass redraws. Lower keeps more of the original.",
+  qi2_sampling:
+    "Turbo uses the Viggle 6-step LoRA. Base runs the base model with the base steps from Settings.",
 };
 
 const TRANSIENT_SEEDVR = new Set(["queued", "downloading", "error"]);
@@ -277,6 +285,67 @@ function colorCorrectionOptions(
 function sectionSetter(target: GeneratorHandle["target"]) {
   return (name: string, key: string, value: unknown) =>
     updateGenerator(target, (next) => next.set(name, key, value));
+}
+
+const UPSCALER_LABELS: Record<string, string> = {
+  qi2: "QI2",
+  seedvr: "SeedVR",
+  off: "OFF",
+};
+
+function Qi2UpscalerFields({
+  set,
+  upscaler,
+}: {
+  set: ReturnType<typeof sectionSetter>;
+  upscaler: Section;
+}) {
+  const defaults = DEFAULT_GENERATOR_DATA.upscaler;
+  const pass = String(upscaler.qi2_pass || defaults.qi2_pass);
+  return (
+    <>
+      <ResolutionScaleField
+        help={HELP.qi2_target_size}
+        label="resolution scale"
+        onChange={(size) => set("upscaler", "qi2_target_size", size)}
+        value={upscaler.qi2_target_size ?? defaults.qi2_target_size}
+      />
+      <SegmentedField
+        help={HELP.qi2_pass}
+        label="pass"
+        onChange={(value) => set("upscaler", "qi2_pass", value)}
+        options={[
+          { label: "Full repaint", value: "repaint" },
+          { label: "Detail pass", value: "detail" },
+        ]}
+        value={pass}
+      />
+      {pass === "detail" ? (
+        <SliderField
+          format={(value) => value.toFixed(2)}
+          help={HELP.qi2_detail_denoise}
+          label="detail pass denoise"
+          max={1}
+          min={0.05}
+          onChange={(value) => set("upscaler", "qi2_detail_denoise", value)}
+          step={0.05}
+          value={Number(
+            upscaler.qi2_detail_denoise ?? defaults.qi2_detail_denoise
+          )}
+        />
+      ) : null}
+      <SegmentedField
+        help={HELP.qi2_sampling}
+        label="sampling"
+        onChange={(value) => set("upscaler", "qi2_sampling", value)}
+        options={[
+          { label: "Turbo", value: "turbo" },
+          { label: "Base", value: "base" },
+        ]}
+        value={String(upscaler.qi2_sampling || defaults.qi2_sampling)}
+      />
+    </>
+  );
 }
 
 function BgRemoveBlock({ handle }: { handle: GeneratorHandle }) {
@@ -512,13 +581,16 @@ export function GeneratorInlineSettings({
       <Block title="Upscaler">
         <SegmentedField
           onChange={(mode) => set("upscaler", "mode", mode)}
-          options={[
-            { label: "SeedVR", value: "seedvr" },
-            { label: "OFF", value: "off" },
-          ]}
+          options={model.upscalerModes().map((value) => ({
+            label: UPSCALER_LABELS[value] ?? value,
+            value,
+          }))}
           value={String(upscaler.mode || "seedvr")}
         />
-        {upscaler.mode === "off" ? null : (
+        {upscaler.mode === "qi2" ? (
+          <Qi2UpscalerFields set={set} upscaler={upscaler} />
+        ) : null}
+        {upscaler.mode === "off" || upscaler.mode === "qi2" ? null : (
           <>
             <SeedvrPicker
               model={String(upscaler.model || "")}

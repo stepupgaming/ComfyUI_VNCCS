@@ -21,6 +21,11 @@ Folders below are relative to `F:\VNCCS\ComfyUI\models` unless they start with a
 | Creator overhaul | `QI2.1/VNCCS/VNCCS_QI2_AnimeOverhaulV1.2.safetensors` | `MIUProject/VNCCS_v3.0` | `loras` |
 | Clothes Core | `QI2.1/VNCCS/VNCCS_QI2_ClothesCoreV2.6.safetensors` | `MIUProject/VNCCS_v3.0` | `loras` |
 | Pose Studio | `QI2.1/VNCCS/VNCCS_QI2_PoseStudioV1.1.safetensors` | `MIUProject/VNCCS_v3.0` | `loras` |
+| Upscaler decode VAE | `texture_fix_vae_for_qwen_image_2.1_bf16.safetensors` | `madebyollin/texture-fix-vae-for-qwen-image-2.1` at `702909b4` | `F:\Models\qwen-image-2.1\vae` |
+| Upscaler Consistency LoRA | `QI2/Consistency/qwen-image-2.1-consistency.safetensors` | `ausboss/Qwen-Image-2.1-Consistency-LoRA` at `8f05b0fa` | `loras` |
+
+The QI2 upscaler downloads its two files at the pinned revisions on first use if they are
+missing. Both use the non-commercial Qwen Research license.
 
 ## MiniMax H3: sheets when a character uses the H3 family
 

@@ -206,6 +206,99 @@ describe("Character Generator background removal", () => {
   });
 });
 
+describe("Character Generator QI2 upscaler", () => {
+  const upscalerFields = (h: ReturnType<typeof harness>) =>
+    h
+      .model()
+      .settingsGroups()
+      .flatMap((group) => group.fields)
+      .filter((field) => field.section === "upscaler");
+
+  for (const kind of ["base", "clone", "clothes"] as const) {
+    it(`selects QI2 for QI2 pipes and restores the previous mode (${kind})`, () => {
+      const h = harness({ kind, saved: { upscaler: { mode: "off" } } });
+      h.poll();
+      expect(h.serialized.upscaler.mode).toBe("qi2");
+      h.switchTo("Klein9b");
+      expect(h.data.upscaler.mode).toBe("off");
+      h.switchTo("QI2");
+      expect(h.data.upscaler.mode).toBe("qi2");
+      h.switchTo("MiniMaxH3");
+      expect(h.data.upscaler.mode).toBe("off");
+    });
+  }
+
+  it("keeps a manual choice while the family stays QI2", () => {
+    const h = harness();
+    h.poll();
+    h.set("upscaler", "mode", "seedvr");
+    h.poll();
+    expect(h.data.upscaler.mode).toBe("seedvr");
+    h.switchTo("Klein9b");
+    expect(h.data.upscaler.mode).toBe("seedvr");
+    h.switchTo("QI2");
+    expect(h.data.upscaler.mode).toBe("qi2");
+  });
+
+  it("repairs a QI2 mode saved for another family", () => {
+    const h = harness({
+      family: "Klein9b",
+      saved: {
+        upscaler: { mode: "qi2" },
+        ui: { upscaler_model_kind: "klein9b" },
+      },
+    });
+    h.poll();
+    expect(h.data.upscaler.mode).toBe("seedvr");
+  });
+
+  it("offers the QI2 mode and its fields only for QI2 pipes", () => {
+    const h = harness();
+    h.poll();
+    const qi2 = upscalerFields(h);
+    const mode = qi2.find((field) => field.key === "mode");
+    expect(mode?.type === "select" && mode.options).toEqual([
+      "qi2",
+      "seedvr",
+      "off",
+    ]);
+    expect(qi2.map((field) => field.key)).toEqual(
+      expect.arrayContaining([
+        "qi2_target_size",
+        "qi2_prompt",
+        "qi2_pass",
+        "qi2_detail_denoise",
+        "qi2_sampling",
+        "qi2_steps",
+        "qi2_vae",
+        "qi2_alpha",
+        "qi2_align",
+        "qi2_consistency",
+      ])
+    );
+    expect(h.data.upscaler).toMatchObject({
+      qi2_target_size: 4096,
+      qi2_pass: "repaint",
+      qi2_sampling: "turbo",
+      qi2_vae: "texture_fix",
+      qi2_alpha: "source",
+    });
+    h.switchTo("Klein9b");
+    expect(
+      upscalerFields(h).some((field) => field.key.startsWith("qi2_"))
+    ).toBe(false);
+  });
+
+  it("leaves the emotions generator's upscaler alone", () => {
+    let data = parseGeneratorData({});
+    data = updateGeneratorData(data, "emotions", (model) => {
+      model.syncModelResolution({ emotionMode: "qi2" });
+    });
+    expect(data.upscaler.mode).toBe("seedvr");
+    expect(data.ui.upscaler_model_kind).toBeUndefined();
+  });
+});
+
 describe("Character Generator emotion settings", () => {
   function emotions(mode: string, saved: Record<string, unknown> = {}) {
     let data = parseGeneratorData(saved);

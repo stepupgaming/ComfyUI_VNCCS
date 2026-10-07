@@ -249,8 +249,6 @@ def test_qi2_emotion_uses_bbox_crop_qwen_encoder_and_exact_paste_region(monkeypa
             return (detector, object())
         if name == "ImageScaleToTotalPixels":
             return (torch.zeros(1, 256, 256, 4),)
-        if name == "EmptyLatentImage":
-            return ({"samples": torch.zeros(1, 4, 16, 16)},)
         if name == "KSampler":
             return (kwargs["latent_image"],)
         if name == "VAEDecode":
@@ -269,10 +267,14 @@ def test_qi2_emotion_uses_bbox_crop_qwen_encoder_and_exact_paste_region(monkeypa
     names = [name for name, _ in calls]
     assert names == [
         "UltralyticsDetectorProvider", "ImageScaleToTotalPixels",
-        "TextEncodeQwenImage21", "EmptyLatentImage", "QwenImage21Cache", "KSampler", "VAEDecode",
+        "TextEncodeQwenImage21", "QwenImage21Cache", "KSampler", "VAEDecode",
     ]
     scale = next(kwargs for name, kwargs in calls if name == "ImageScaleToTotalPixels")
     assert scale["megapixels"] == 2.0
+    assert scale["resolution_steps"] == 32
+    aligned_side = ((100 + 2 * dilation + 31) // 32) * 32
+    assert scale["image"].shape == (1, aligned_side, aligned_side, 4)
+    assert torch.allclose(scale["image"][..., 3], torch.full((1, aligned_side, aligned_side), 0.35))
     cache = next(kwargs for name, kwargs in calls if name == "QwenImage21Cache")
     assert (cache["device"], cache["dtype"]) == ("cpu", "int4")
     encoder = next(kwargs for name, kwargs in calls if name == "TextEncodeQwenImage21")
@@ -283,19 +285,11 @@ def test_qi2_emotion_uses_bbox_crop_qwen_encoder_and_exact_paste_region(monkeypa
         "keep character's clothes\n"
         "Transparent background with alpha channel."
     )
-    assert encoder["resolution"] == 1024
-    aligned_side = ((100 + 2 * dilation + 31) // 32) * 32
-    assert encoder["images"]["image_1"].shape == (1, aligned_side, aligned_side, 4)
-    assert torch.allclose(
-        encoder["images"]["image_1"][..., 3],
-        torch.full((1, aligned_side, aligned_side), 0.35),
-    )
-    assert scale["image"] is encoder["images"]["image_1"]
-    assert scale["resolution_steps"] == 32
-    empty = next(kwargs for name, kwargs in calls if name == "EmptyLatentImage")
-    assert empty["width"] % 32 == 0
-    assert empty["height"] % 32 == 0
+    # The scaled crop is the reference at its own size, so the encoder latent matches it.
+    assert encoder["resolution"] == 0
+    assert encoder["images"]["image_1"].shape == (1, 256, 256, 4)
     sample = next(kwargs for name, kwargs in calls if name == "KSampler")
+    assert sample["latent_image"] == "encoder latent"
     assert sample["seed"] == 42
     assert sample["denoise"] == 1.0
     assert generated_crop.shape == (1, 256, 256, 4)

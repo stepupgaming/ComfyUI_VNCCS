@@ -33,6 +33,8 @@ export const GENERATOR_QWEN_INSTRUCTION =
 const QI2_EMOTION_PROMPT_TEMPLATE =
   "Upscale face image.\nMake character's face emotion {emotion}\nChange only face. Keep original neck colour, clothes and hairs\nkeep character's clothes";
 const QI2_EMOTION_BBOX_DEFAULTS = { bbox_threshold: 0.3, drop_size: 10 };
+export const QI2_UPSCALE_PROMPT =
+  "Upscale the image while preserving the original composition, framing, subject appearance, object positions, colors, lighting, and visual style. Reproduce the same image with greater clarity and finer detail.";
 
 export const SEEDVR_DIT_MODELS = [
   "seedvr2_3b_fp16.safetensors",
@@ -99,6 +101,8 @@ export interface GeneratorUi {
   resolution_model_key?: string;
   resolution_model_kind?: string;
   selected_preview?: string;
+  upscaler_model_kind?: string;
+  upscaler_previous_mode?: string;
   user_selected_preview?: boolean;
   [key: string]: unknown;
 }
@@ -231,6 +235,16 @@ export const DEFAULT_GENERATOR_DATA: GeneratorData = {
     tile_debug: "false",
     cache_vae: false,
     enable_debug: false,
+    qi2_target_size: 4096,
+    qi2_prompt: QI2_UPSCALE_PROMPT,
+    qi2_pass: "repaint",
+    qi2_detail_denoise: 0.5,
+    qi2_sampling: "turbo",
+    qi2_steps: 25,
+    qi2_consistency: true,
+    qi2_vae: "texture_fix",
+    qi2_alpha: "source",
+    qi2_align: "detect",
   },
   bg_remove: {
     use_internal_rmbg: false,
@@ -687,6 +701,11 @@ export class GeneratorModel {
     return this.data.ui.resolution_model_kind === "qi2";
   }
 
+  /** The QI2 upscaler reuses the pipe's own model, so only QI2 pipes offer it. */
+  upscalerModes(): string[] {
+    return this.isQi2() ? ["qi2", "seedvr", "off"] : ["seedvr", "off"];
+  }
+
   rememberModelResolution(edited = false, now: number = Date.now()): void {
     const key = this.data.ui.resolution_model_key;
     if (this.isEmotions || !key) {
@@ -729,8 +748,31 @@ export class GeneratorModel {
     if (this.syncBgRemoveKind(kind)) {
       changed = true;
     }
+    if (!this.isEmotions && this.syncUpscalerKind(kind)) {
+      changed = true;
+    }
     this.data.ui = { ...this.data.ui, resolution_model_kind: kind };
     return changed;
+  }
+
+  /** QI2 switches the upscaler to QI2; other families restore the previous mode. */
+  private syncUpscalerKind(kind: string): boolean {
+    const ui = this.data.ui;
+    const mode = String(this.data.upscaler.mode || "seedvr");
+    if (ui.upscaler_model_kind === kind && (kind === "qi2" || mode !== "qi2")) {
+      return false;
+    }
+    if (kind === "qi2") {
+      if (mode !== "qi2") {
+        ui.upscaler_previous_mode = mode;
+      }
+      this.data.upscaler.mode = "qi2";
+    } else if (mode === "qi2") {
+      this.data.upscaler.mode =
+        ui.upscaler_previous_mode === "off" ? "off" : "seedvr";
+    }
+    ui.upscaler_model_kind = kind;
+    return true;
   }
 
   private resolveModelSource(source: {
@@ -1034,59 +1076,86 @@ export class GeneratorModel {
           }
         );
       }
-      groups.push(
-        {
-          title: "Generator Upscaler",
+      groups.push({
+        title: "Generator Upscaler",
+        fields: [
+          select("upscaler", "mode", "mode", this.upscalerModes()),
+          check(
+            "upscaler",
+            "inherit_pipe_seed",
+            "Use seed from connected pipe"
+          ),
+          number("upscaler", "seed", "seed", 0, Number.MAX_SAFE_INTEGER, 1),
+        ],
+      });
+      if (qi2) {
+        groups.push({
+          title: "Qwen Image 2.1 Upscaler",
           fields: [
-            select("upscaler", "mode", "mode", ["seedvr", "off"]),
+            resolutionScale("upscaler", "qi2_target_size"),
+            textarea("upscaler", "qi2_prompt", "prompt"),
+            select("upscaler", "qi2_pass", "pass", ["repaint", "detail"]),
+            number(
+              "upscaler",
+              "qi2_detail_denoise",
+              "detail pass denoise",
+              0.05,
+              1,
+              0.05
+            ),
+            select("upscaler", "qi2_sampling", "sampling", ["turbo", "base"]),
+            number("upscaler", "qi2_steps", "base steps", 1, 200, 1),
+            select("upscaler", "qi2_vae", "decode VAE", [
+              "texture_fix",
+              "pipe",
+            ]),
+            select("upscaler", "qi2_alpha", "alpha", ["source", "model"]),
+            select("upscaler", "qi2_align", "alignment", [
+              "off",
+              "detect",
+              "correct",
+            ]),
             check(
               "upscaler",
-              "inherit_pipe_seed",
-              "Use seed from connected pipe"
-            ),
-            number("upscaler", "seed", "seed", 0, Number.MAX_SAFE_INTEGER, 1),
-          ],
-        },
-        {
-          title: "Native SeedVR2",
-          fields: [
-            select("upscaler", "model", "diffusion model", SEEDVR_DIT_MODELS, {
-              nodeName: "UNETLoader",
-              inputName: "unet_name",
-            }),
-            select("upscaler", "vae", "VAE", SEEDVR_VAE_MODELS, {
-              nodeName: "VAELoader",
-              inputName: "vae_name",
-            }),
-            number(
-              "upscaler",
-              "resolution",
-              "target short edge",
-              16,
-              16_384,
-              2
-            ),
-            number(
-              "upscaler",
-              "max_resolution",
-              "maximum edge (0 = unlimited)",
-              0,
-              16_384,
-              2
-            ),
-            select(
-              "upscaler",
-              "color_correction",
-              "color correction",
-              SEEDVR_COLOR_CORRECTION_MODES,
-              {
-                nodeName: "SeedVR2PostProcessing",
-                inputName: "color_correction_method",
-              }
+              "qi2_consistency",
+              "Use the Consistency LoRA (less drift)"
             ),
           ],
-        }
-      );
+          note: "Repaint regenerates the whole image at the new size; detail keeps the source and redraws only up to the denoise strength. Turbo uses the Viggle 6-step LoRA; base uses the base steps at CFG 1. Source alpha keeps every sprite's matte identical to its pose. Alignment measures the content shift against the source, and correct moves the result back. The texture-fix VAE and Consistency LoRA download on first use.",
+        });
+      }
+      groups.push({
+        title: "Native SeedVR2",
+        fields: [
+          select("upscaler", "model", "diffusion model", SEEDVR_DIT_MODELS, {
+            nodeName: "UNETLoader",
+            inputName: "unet_name",
+          }),
+          select("upscaler", "vae", "VAE", SEEDVR_VAE_MODELS, {
+            nodeName: "VAELoader",
+            inputName: "vae_name",
+          }),
+          number("upscaler", "resolution", "target short edge", 16, 16_384, 2),
+          number(
+            "upscaler",
+            "max_resolution",
+            "maximum edge (0 = unlimited)",
+            0,
+            16_384,
+            2
+          ),
+          select(
+            "upscaler",
+            "color_correction",
+            "color correction",
+            SEEDVR_COLOR_CORRECTION_MODES,
+            {
+              nodeName: "SeedVR2PostProcessing",
+              inputName: "color_correction_method",
+            }
+          ),
+        ],
+      });
     }
     groups.push(...this.bgRemoveGroups());
     return groups;

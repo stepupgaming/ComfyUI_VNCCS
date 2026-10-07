@@ -60,7 +60,7 @@ from .vnccs_control_center import (
     _entry_kind,
 )
 from .vnccs_flux_klein_encoder import VNCCS_Flux_Klein_Encoder
-from .qi2_viggle import apply_viggle_turbo_lora, viggle_turbo_sigmas
+from .qi2_viggle import VIGGLE_TURBO_NODES, apply_viggle_turbo_lora, viggle_turbo_sigmas
 from .vnccs_utils import VNCCSChromaKey, VNCCS_MaskExtractor, VNCCS_RMBG2
 from ..utils import (
     atomic_output_path,
@@ -756,6 +756,30 @@ QI2_EMOTION_PROMPT_TEMPLATE = (
     "Change only face. Keep original neck colour, clothes and hairs\n"
     "keep character's clothes"
 )
+QI2_UPSCALE_PROMPT = (
+    "Upscale the image while preserving the original composition, framing, subject appearance, "
+    "object positions, colors, lighting, and visual style. Reproduce the same image with greater "
+    "clarity and finer detail."
+)
+# Pinned Hugging Face files the QI2 upscaler downloads on first use.
+QI2_UPSCALER_FILES = {
+    "texture_fix_vae": {
+        "repo_id": "madebyollin/texture-fix-vae-for-qwen-image-2.1",
+        "revision": "702909b4d408912c7a28fadea06e8b7fdb38ef0c",
+        "filename": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+        "folder": "vae",
+        "name": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    },
+    "consistency_lora": {
+        "repo_id": "ausboss/Qwen-Image-2.1-Consistency-LoRA",
+        "revision": "8f05b0fa027d517fa396fb31b71e0eaf48110e89",
+        "filename": "qwen-image-2.1-consistency.safetensors",
+        "folder": "loras",
+        "name": "QI2/Consistency/qwen-image-2.1-consistency.safetensors",
+    },
+}
+# A larger phase-correlation peak is a failed match, not a drift worth undoing.
+QI2_UPSCALE_MAX_SHIFT = 64
 
 
 DEFAULT_WIDGET_DATA = {
@@ -793,6 +817,16 @@ DEFAULT_WIDGET_DATA = {
         "tile_debug": "false",
         "cache_vae": False,
         "enable_debug": False,
+        "qi2_target_size": 4096,
+        "qi2_prompt": QI2_UPSCALE_PROMPT,
+        "qi2_pass": "repaint",
+        "qi2_detail_denoise": 0.5,
+        "qi2_sampling": "turbo",
+        "qi2_steps": 25,
+        "qi2_consistency": True,
+        "qi2_vae": "texture_fix",
+        "qi2_alpha": "source",
+        "qi2_align": "detect",
     },
     "bg_remove": {
         # TODO: Decide whether internal RMBG should return as a supported generator option.
@@ -1017,6 +1051,33 @@ def _resolution_scale_value(value, default=1024):
 
 def _resolution_scale_megapixels(value, default=1024):
     return _resolution_scale_value(value, default=default) / 1024.0
+
+
+def _qi2_phase_shift(reference, result):
+    """Whole-pixel (dx, dy) by which `result`'s content moved away from `reference`."""
+    def centered_luminance(image):
+        image = image[0].float().cpu()
+        rgb = image[..., :3]
+        if image.shape[-1] > 3:
+            rgb = rgb * image[..., 3:4] + (1.0 - image[..., 3:4])
+        gray = rgb.mean(dim=-1)
+        return gray - gray.mean()
+
+    before, after = centered_luminance(reference), centered_luminance(result)
+    height, width = before.shape
+    window = torch.outer(torch.hann_window(height, periodic=False), torch.hann_window(width, periodic=False))
+    cross = torch.fft.rfft2(after * window) * torch.fft.rfft2(before * window).conj()
+    correlation = torch.fft.irfft2(cross / cross.abs().clamp_min(1e-8), s=(height, width))
+    dy, dx = divmod(int(torch.argmax(correlation)), width)
+    return (dx - width if dx > width // 2 else dx, dy - height if dy > height // 2 else dy)
+
+
+def _translate_image(image, dx, dy):
+    """Move BHWC content by whole pixels, repeating the edge into the uncovered border."""
+    height, width = int(image.shape[1]), int(image.shape[2])
+    padded = F.pad(image.movedim(-1, 1), (max(dx, 0), max(-dx, 0), max(dy, 0), max(-dy, 0)), mode="replicate")
+    top, left = max(-dy, 0), max(-dx, 0)
+    return padded[:, :, top:top + height, left:left + width].movedim(1, -1).contiguous()
 
 
 class VNCCS_CharacterGenerator:
@@ -1324,15 +1385,17 @@ class VNCCS_CharacterGenerator:
             dtype=cache.get("dtype", "int8"),
         )[0]
 
-    def _qi2_turbo_lora(self, pipe):
+    def _qi2_turbo_lora(self, pipe, enabled_only=True):
         entries = getattr(pipe, "lora_entries", []) or []
         states = getattr(pipe, "lora_states", []) or []
         enabled = {item.get("name") for item in states if item.get("auto_apply")}
         for entry in entries:
             if (_entry_kind(entry) != "qi2" or str(entry.get("type", "")).lower() != "turbolora"
-                    or entry.get("name") not in enabled):
+                    or (enabled_only and entry.get("name") not in enabled)):
                 continue
             if "viggle" not in str(entry.get("name", "")).lower():
+                if not enabled_only:
+                    continue
                 raise RuntimeError("QI2 Turbo LoRA must use the Viggle six-step adapter.")
             full_path, exists = _find_model_on_disk(entry.get("local_path", ""))
             if not exists:
@@ -1356,10 +1419,18 @@ class VNCCS_CharacterGenerator:
             raise ValueError("Viggle Turbo requires 6 steps and CFG 1 in Control Center.")
         if float(sampler.get("denoise", 1.0)) != 1.0:
             raise ValueError("Viggle Turbo requires denoise 1.0.")
-        noise = _call_comfy_node("RandomNoise", noise_seed=sampler["seed"])[0]
+        return self._qi2_turbo_sample(model, positive, latent, sampler["seed"])
+
+    def _qi2_turbo_sample(self, model, positive, latent, seed, denoise=1.0):
+        # Like KSampler denoise, a partial pass keeps the raw (unshifted) nodes at or below the strength.
+        start = next(
+            (index for index, node in enumerate(VIGGLE_TURBO_NODES) if node <= denoise),
+            len(VIGGLE_TURBO_NODES) - 1,
+        )
+        noise = _call_comfy_node("RandomNoise", noise_seed=seed)[0]
         guider = _call_comfy_node("BasicGuider", model=model, conditioning=positive)[0]
         sampler_node = _call_comfy_node("KSamplerSelect", sampler_name="euler")[0]
-        sigmas = viggle_turbo_sigmas(latent)
+        sigmas = viggle_turbo_sigmas(latent)[start:]
         return _call_comfy_node(
             "SamplerCustomAdvanced", noise=noise, guider=guider, sampler=sampler_node,
             sigmas=sigmas, latent_image=latent,
@@ -1802,21 +1873,17 @@ class VNCCS_CharacterGenerator:
         if not torch.is_tensor(scaled_tensor) or scaled_tensor.ndim != 4:
             raise RuntimeError("QI2 emotion crop scaling did not return an IMAGE tensor.")
 
-        positive, negative, _encoder_latent = _call_comfy_node(
+        # The reference must be the 32-aligned scaled crop at its own size: sampling on any
+        # latent size other than the reference's makes QI2 zoom the face before the paste.
+        positive, negative, latent = _call_comfy_node(
             "TextEncodeQwenImage21",
             clip=pipe_values["clip"],
             vae=pipe_values["vae"],
             prompt=prompt,
             negative_prompt=str(negative_prompt or ""),
-            resolution=1024,
-            images={"image_1": aligned_crop},
+            resolution=0,
+            images={"image_1": scaled_tensor},
         )
-        latent = _call_comfy_node(
-            "EmptyLatentImage",
-            width=int(scaled_tensor.shape[2]),
-            height=int(scaled_tensor.shape[1]),
-            batch_size=1,
-        )[0]
         model, turbo = self._qi2_prepare_model(pipe_values["model"], pipe, pipe_values)
         samples = self._qi2_sample(model, positive, negative, latent, sampler, turbo=turbo)
         generated_crop = self._qi2_decode(samples, pipe_values["vae"])
@@ -2660,7 +2727,88 @@ class VNCCS_CharacterGenerator:
                 alpha = alpha[:result.shape[0]]
         return torch.cat([result[..., :3], alpha.to(device=result.device, dtype=result.dtype)], dim=-1)
 
-    def _run_upscaler(self, image, background, settings, seed, unique_id=None, cache_dir=None, stage="upscaler", use_internal_rmbg=False, bg_remove_settings=None):
+    def _qi2_upscale_dimensions(self, image, target_size):
+        height, width = int(image.shape[1]), int(image.shape[2])
+        scale = math.sqrt(_resolution_scale_megapixels(target_size) * 1024 * 1024 / (width * height))
+        return max(32, round(width * scale / 32) * 32), max(32, round(height * scale / 32) * 32)
+
+    def _run_qi2_upscaler(self, image, pipe, settings, seed, prompt, unique_id=None, cache_dir=None, stage="upscaler"):
+        pipe_values = self._extract_pipe(pipe) if pipe is not None else {}
+        if not self._is_qi2_pipe(pipe_values):
+            raise RuntimeError("The QI2 upscaler needs a Qwen Image 2.1 pipe. Choose SeedVR or Off for this model.")
+        defaults = DEFAULT_WIDGET_DATA["upscaler"]
+
+        def choice(key, options):
+            value = str(settings.get(key, defaults[key]) or "").strip().lower()
+            return value if value in options else defaults[key]
+
+        turbo = choice("qi2_sampling", ("turbo", "base")) == "turbo"
+        denoise = 1.0
+        if choice("qi2_pass", ("repaint", "detail")) == "detail":
+            denoise = max(0.05, min(1.0, float(settings.get("qi2_detail_denoise", defaults["qi2_detail_denoise"]))))
+        align = choice("qi2_align", ("off", "detect", "correct"))
+        source_alpha = choice("qi2_alpha", ("source", "model")) == "source"
+        target_size = settings.get("qi2_target_size", defaults["qi2_target_size"])
+
+        model = pipe_values["model"]
+        if _as_bool(settings.get("qi2_consistency", defaults["qi2_consistency"]), True):
+            model = _call_comfy_node(
+                "LoraLoaderModelOnly", model=model,
+                lora_name=_ensure_qi2_upscaler_file("consistency_lora"), strength_model=1.0,
+            )[0]
+        if turbo:
+            turbo_lora = self._qi2_turbo_lora(pipe, enabled_only=False)
+            if not turbo_lora:
+                raise RuntimeError("QI2 upscaler turbo sampling needs the Qwen Image 2.1 Viggle Turbo LoRA from VNCCS Control Center.")
+            model = apply_viggle_turbo_lora(model, turbo_lora, strength=1.0)
+        model = self._qi2_cache_model(model, pipe_values)
+        decode_vae = pipe_values["vae"]
+        if choice("qi2_vae", ("texture_fix", "pipe")) == "texture_fix":
+            decode_vae = _call_comfy_node(
+                "VAELoader", vae_name=_ensure_qi2_upscaler_file("texture_fix_vae"), _vnccs_node_id=unique_id,
+            )[0]
+        sampler = {
+            "seed": int(seed), "steps": max(1, min(200, int(settings.get("qi2_steps", defaults["qi2_steps"])))),
+            "cfg": 1.0, "sampler_name": "euler", "scheduler": "simple", "denoise": denoise,
+        }
+
+        images = self._split_batch(image)
+        total = len(images)
+        results = []
+        for index, item in enumerate(images, start=1):
+            width, height = self._qi2_upscale_dimensions(item, target_size)
+            resized = _call_comfy_node(
+                "ImageScale", image=item, upscale_method="lanczos", width=width, height=height, crop="disabled",
+            )[0]
+            # resolution=0 keeps the 32-aligned reference at full size, and its latent output matches that
+            # grid exactly; any other sampling size makes QI2 zoom and shift the edit.
+            positive, negative, latent = _call_comfy_node(
+                "TextEncodeQwenImage21", clip=pipe_values["clip"], vae=pipe_values["vae"],
+                prompt=prompt, negative_prompt="", resolution=0, images={"image_1": resized},
+            )
+            if denoise < 1.0:
+                latent = _call_comfy_node("VAEEncode", pixels=resized, vae=pipe_values["vae"])[0]
+            if turbo:
+                samples = self._qi2_turbo_sample(model, positive, latent, sampler["seed"], denoise)
+            else:
+                samples = self._qi2_sample(model, positive, negative, latent, sampler)
+            decoded = self._list_to_batch(self._qi2_decode(samples, decode_vae)).detach().cpu()
+            message = f"QI2 upscaled image {index} of {total} to {width}x{height}"
+            if align != "off":
+                dx, dy = _qi2_phase_shift(resized, decoded)
+                message += f"; content shift {dx:+d},{dy:+d} px"
+                if align == "correct" and (dx or dy) and max(abs(dx), abs(dy)) <= QI2_UPSCALE_MAX_SHIFT:
+                    decoded = _translate_image(decoded, -dx, -dy)
+                    message += " corrected"
+            if resized.shape[-1] >= 4 and (source_alpha or decoded.shape[-1] < 4):
+                decoded = torch.cat([decoded[..., :3], resized[..., 3:4].to(decoded)], dim=-1)
+            elif resized.shape[-1] < 4:
+                decoded = decoded[..., :3]
+            results.append(decoded)
+            self._log_stage(unique_id, stage, message, current=index, total=total, cache_dir=cache_dir)
+        return self._safe_image_batch(results, stage=f"{stage} QI2 output")
+
+    def _run_upscaler(self, image, background, settings, seed, unique_id=None, cache_dir=None, stage="upscaler", use_internal_rmbg=False, bg_remove_settings=None, pipe=None):
         native_bg_remove = self._is_native_bg_remove(bg_remove_settings)
         source_image = self._list_to_batch(image)
         model_image = source_image[..., :3] if native_bg_remove and torch.is_tensor(source_image) and source_image.ndim == 4 and source_image.shape[-1] >= 4 else image
@@ -2681,6 +2829,21 @@ class VNCCS_CharacterGenerator:
                 cache_dir=cache_dir,
             )
             return result
+        if mode == "qi2":
+            started_at = time.time()
+            prompt = self._prompt_with_solid_background(
+                settings.get("qi2_prompt") or QI2_UPSCALE_PROMPT, background, bg_remove_settings,
+            )
+            result_batch = self._run_qi2_upscaler(
+                source_image, pipe, settings, seed, prompt, unique_id=unique_id, cache_dir=cache_dir, stage=stage,
+            )
+            done_total = int(result_batch.shape[0])
+            self._emit(
+                unique_id, stage, "done", result_batch,
+                f"QI2 upscaled batch of {done_total} image(s) in {time.time() - started_at:.1f}s",
+                done_total, done_total, cache_dir=cache_dir,
+            )
+            return result_batch
 
         self._log_stage(unique_id, stage, f"Loading SeedVR models for {total} image(s)", current=0, total=total, cache_dir=cache_dir)
         dit, vae = self._run_upscaler_models(settings, node_id=unique_id)
@@ -2732,7 +2895,7 @@ class VNCCS_CharacterGenerator:
         )
         return result_batch
 
-    def _run_source_upscaler(self, image, settings, seed, unique_id=None, cache_dir=None, stage="source_upscaler"):
+    def _run_source_upscaler(self, image, settings, seed, unique_id=None, cache_dir=None, stage="source_upscaler", pipe=None):
         images = self._split_batch(image)
         total = len(images)
         seed = self._upscaler_seed(settings, seed)
@@ -2750,6 +2913,19 @@ class VNCCS_CharacterGenerator:
                 cache_dir=cache_dir,
             )
             return result
+        if mode == "qi2":
+            started_at = time.time()
+            result_batch = self._run_qi2_upscaler(
+                image, pipe, settings, seed, settings.get("qi2_prompt") or QI2_UPSCALE_PROMPT,
+                unique_id=unique_id, cache_dir=cache_dir, stage=stage,
+            )
+            done_total = int(result_batch.shape[0])
+            self._emit(
+                unique_id, stage, "done", result_batch,
+                f"QI2 upscaled source batch of {done_total} image(s) in {time.time() - started_at:.1f}s",
+                done_total, done_total, cache_dir=cache_dir,
+            )
+            return result_batch
 
         self._log_stage(unique_id, stage, f"Loading SeedVR models for {total} source image(s)", current=0, total=total, cache_dir=cache_dir)
         dit, vae = self._run_upscaler_models(settings, node_id=unique_id)
@@ -2971,6 +3147,7 @@ class VNCCS_CharacterGenerator:
                     cache_dir=cache_dir,
                     use_internal_rmbg=settings["bg_remove"].get("use_internal_rmbg", False),
                     bg_remove_settings=settings["bg_remove"],
+                    pipe=pipe,
                 )
                 if regenerate_index is not None:
                     upscaled = self._replace_batch_item(_load_cached_tensor(cache_dir, "upscaler"), regenerate_index, upscaled)
@@ -3119,6 +3296,7 @@ class VNCCS_CharacterCloneGenerator(VNCCS_CharacterGenerator):
                 stage=up_stage,
                 use_internal_rmbg=settings["bg_remove"].get("use_internal_rmbg", False),
                 bg_remove_settings=settings["bg_remove"],
+                pipe=pipe,
             )
             if regenerate_index is not None:
                 upscaled = self._replace_batch_item(_load_cached_tensor(cache_dir, up_stage), regenerate_index, upscaled)
@@ -3431,6 +3609,7 @@ class VNCCS_ClothesGenerator(VNCCS_CharacterGenerator):
                     unique_id=unique_id,
                     cache_dir=cache_dir,
                     stage="source_upscaler",
+                    pipe=pipe,
                 )
                 self._save_stage(cache_dir, "source_upscaler", source_upscaled)
 
@@ -3487,6 +3666,7 @@ class VNCCS_ClothesGenerator(VNCCS_CharacterGenerator):
                     cache_dir=cache_dir,
                     use_internal_rmbg=settings["bg_remove"].get("use_internal_rmbg", False),
                     bg_remove_settings=settings["bg_remove"],
+                    pipe=pipe,
                 )
                 if regenerate_index is not None:
                     upscaled = self._replace_batch_item(_load_cached_tensor(cache_dir, "upscaler"), regenerate_index, upscaled)
@@ -5012,6 +5192,30 @@ def _ensure_seedvr_vae_model(name="ema_vae_fp16.safetensors"):
         _SEEDVR_DOWNLOAD_STATUS[key] = {"status": "error", "message": str(exc)}
         raise RuntimeError(f"Failed to download required SeedVR2 VAE '{name}': {exc}") from exc
     return target
+
+
+def _ensure_qi2_upscaler_file(key):
+    spec = QI2_UPSCALER_FILES[key]
+    if folder_paths.get_full_path(spec["folder"], spec["name"]):
+        return spec["name"]
+    from huggingface_hub import hf_hub_download
+
+    target = os.path.normpath(os.path.join(folder_paths.get_folder_paths(spec["folder"])[0], spec["name"]))
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    print(f"[VNCCS Character Generator] Downloading {spec['filename']} for the QI2 upscaler")
+    try:
+        downloaded = hf_hub_download(
+            repo_id=spec["repo_id"],
+            filename=spec["filename"],
+            revision=spec["revision"],
+            local_dir=os.path.dirname(target),
+            token=False,
+        )
+    except Exception as exc:
+        raise RuntimeError(f"Failed to download {spec['filename']} for the QI2 upscaler: {exc}") from exc
+    if os.path.abspath(downloaded) != os.path.abspath(target):
+        os.replace(downloaded, target)
+    return spec["name"]
 
 
 def _seedvr_download_worker(category, name):

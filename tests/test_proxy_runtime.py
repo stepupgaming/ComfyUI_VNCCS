@@ -371,7 +371,7 @@ def generator_module(monkeypatch):
            _find_model_on_disk=lambda *a: None, _rel_within_folder=lambda *a: None,
            _entry_kind=lambda entry: '')
     module(prefix + 'vnccs_flux_klein_encoder', VNCCS_Flux_Klein_Encoder=object)
-    module(prefix + 'qi2_viggle', apply_viggle_turbo_lora=lambda *a: None, viggle_turbo_sigmas=lambda *a: None)
+    module(prefix + 'qi2_viggle', VIGGLE_TURBO_NODES=(), apply_viggle_turbo_lora=lambda *a: None, viggle_turbo_sigmas=lambda *a: None)
     module(prefix + 'vnccs_utils', VNCCSChromaKey=object, VNCCS_MaskExtractor=object, VNCCS_RMBG2=object)
     spec = importlib.util.spec_from_file_location(prefix + 'character_generator', root / 'nodes/character_generator.py')
     generator = importlib.util.module_from_spec(spec)
