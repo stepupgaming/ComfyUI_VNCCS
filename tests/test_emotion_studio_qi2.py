@@ -1,18 +1,72 @@
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 pytest.importorskip("torch", exc_type=ImportError)
 
 from nodes import emotion_generator_v2 as emotion
+from nodes import vnccs_control_center as cc
 
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
+class Asset:
+    def __init__(self, weights=None):
+        self.weights = weights if weights is not None else object()
+
+    def clone(self):
+        return Asset(self.weights)
+
+
+def test_emotion_qi2_reuses_the_control_center_weights(monkeypatch, tmp_path):
+    monkeypatch.setattr(cc, "_MODEL_ASSET_CACHE", {})
+    files = {}
+    for folder, name in (("diffusion_models", "qwen.safetensors"), ("text_encoders", "qwen3vl.safetensors"),
+                         ("vae", "qwen_vae.safetensors")):
+        path = tmp_path / name
+        path.write_bytes(b"weights")
+        files[(folder, name)] = str(path)
+    monkeypatch.setattr(emotion, "get_full_path_agnostic",
+                        lambda _paths, folder, name, require_exists=False: files.get((folder, name)))
+    calls = []
+    monkeypatch.setattr(cc.comfy.sd, "CLIPType", SimpleNamespace(STABLE_DIFFUSION="sd", QWEN_IMAGE="qwen_image"),
+                        raising=False)
+    monkeypatch.setattr(cc.comfy.sd, "load_diffusion_model", lambda *a, **k: calls.append("model") or Asset(),
+                        raising=False)
+    monkeypatch.setattr(cc.comfy.sd, "load_clip", lambda **k: calls.append("clip") or Asset(), raising=False)
+    monkeypatch.setattr(cc.comfy.utils, "load_torch_file", lambda path, **k: ({}, {}), raising=False)
+    monkeypatch.setattr(cc.comfy.sd, "VAE", lambda **k: calls.append("vae") or Asset(), raising=False)
+
+    center_model = cc._load_unet(files[("diffusion_models", "qwen.safetensors")], {"weight_dtype": "default"})
+    center_clip = cc._load_clip_files([files[("text_encoders", "qwen3vl.safetensors")]], "qwen_image")
+    center_vae = cc._load_vae_file(files[("vae", "qwen_vae.safetensors")])
+    settings = {
+        "diffusion_model_name": "qwen.safetensors",
+        "clip_name": "qwen3vl.safetensors",
+        "vae_name": "qwen_vae.safetensors",
+        "clip_type": "qwen_image",
+    }
+    first = emotion.load_qi2_emotion_assets(settings)
+    second = emotion.load_qi2_emotion_assets(settings)
+
+    assert calls == ["model", "clip", "vae"]
+    for model, clip, vae in (first, second):
+        assert model is not center_model and model.weights is center_model.weights
+        assert clip is not center_clip and clip.weights is center_clip.weights
+        assert vae is center_vae
+
+
+def test_emotion_qi2_reports_missing_weights(monkeypatch):
+    monkeypatch.setattr(emotion, "get_full_path_agnostic", lambda *a, **k: None)
+    with pytest.raises(ValueError, match="diffusion_models file not found: 'missing.safetensors'"):
+        emotion.load_qi2_emotion_assets({"diffusion_model_name": "missing.safetensors"})
+
+
 def test_emotion_studio_builds_qi2_pipe_with_cache_and_viggle_state(monkeypatch):
-    monkeypatch.setattr(emotion, "load_anima_assets", lambda settings: ("model", "clip", "vae"))
+    monkeypatch.setattr(emotion, "load_qi2_emotion_assets", lambda settings: ("model", "clip", "vae"))
     settings = {
         "generation_mode": "qi2",
         "mode_settings": {

@@ -1403,7 +1403,10 @@ def _load_clips(clip_entries, selected_names):
             raise RuntimeError(f"[VNCCS Control Center] CLIP not downloaded: '{name}'")
         paths.append(full_path)
         clip_type_str = entry.get("clip_type", clip_type_str)
+    return _load_clip_files(paths, clip_type_str)
 
+
+def _load_clip_files(paths, clip_type_str):
     clip_type = getattr(
         comfy.sd.CLIPType,
         clip_type_str.upper(),
@@ -1424,10 +1427,13 @@ def _load_vae(vae_entries, selected_name):
     full_path, exists = _find_model_on_disk(entry["local_path"])
     if not exists:
         raise RuntimeError(f"[VNCCS Control Center] VAE not downloaded: '{selected_name}'")
+    return _load_vae_file(full_path, "audio_vae" if _is_audio_vae_entry(entry) else "vae")
+
+
+def _load_vae_file(full_path, slot="vae"):
     def load():
         sd, metadata = comfy.utils.load_torch_file(full_path, return_metadata=True)
         return comfy.sd.VAE(sd=sd, metadata=metadata)
-    slot = "audio_vae" if _is_audio_vae_entry(entry) else "vae"
     return _cached_model_asset(slot, (full_path,), (), load)
 
 

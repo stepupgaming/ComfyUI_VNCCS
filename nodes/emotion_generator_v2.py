@@ -8,6 +8,7 @@ import torch
 import numpy as np
 import comfy.sd
 import comfy.utils
+import folder_paths
 from PIL import Image, ImageOps
 
 from ..utils import (
@@ -15,16 +16,16 @@ from ..utils import (
     load_character_info,
     apply_sex, append_age, generate_seed, build_face_details,
     list_costumes, load_costume_info, ensure_safe_name, safe_join_under,
-    privileged_route, file_fingerprint, config_path
+    privileged_route, file_fingerprint, config_path, get_full_path_agnostic
 )
 from .character_creator_v2 import (
     ANIMA_DEFAULTS,
     ILLUSTRIOUS_DEFAULTS,
-    load_anima_assets,
     load_generation_assets,
     normalize_gen_settings,
     get_lora_full_path,
 )
+from .vnccs_control_center import _load_clip_files, _load_unet, _load_vae_file
 from .vnccs_pipe import VNCCS_Pipe
 
 
@@ -146,6 +147,22 @@ def resolve_generation_seed(gen_settings):
     return seed
 
 
+def load_qi2_emotion_assets(gen_settings):
+    """Share the Control Center's cached QI2 weights instead of loading a second copy every run."""
+    paths = []
+    for key, folder in (("diffusion_model_name", "diffusion_models"), ("clip_name", "text_encoders"), ("vae_name", "vae")):
+        name = gen_settings.get(key)
+        path = get_full_path_agnostic(folder_paths, folder, name, require_exists=True) if name else None
+        if not path:
+            raise ValueError(f"QI2 {folder} file not found: '{name or ''}'")
+        paths.append(path)
+    model_path, clip_path, vae_path = paths
+    model = _load_unet(model_path)
+    clip = _load_clip_files([clip_path], gen_settings.get("clip_type") or "qwen_image")
+    # Clones keep this run's patches and CLIP options off the shared cached weights.
+    return model.clone(), clip.clone(), _load_vae_file(vae_path)
+
+
 def build_emotion_pipe(generation_model="Anima", generation_settings="{}"):
     try:
         parsed = json.loads(generation_settings) if generation_settings else {}
@@ -173,7 +190,7 @@ def build_emotion_pipe(generation_model="Anima", generation_settings="{}"):
         if gen_settings.get("turbo_enabled"):
             gen_settings["steps"] = 6
             gen_settings["cfg"] = 1.0
-        model, clip, vae = load_anima_assets(gen_settings)
+        model, clip, vae = load_qi2_emotion_assets(gen_settings)
     else:
         gen_settings = normalize_gen_settings(merged)
         _, model, clip, vae = load_generation_assets(gen_settings)
