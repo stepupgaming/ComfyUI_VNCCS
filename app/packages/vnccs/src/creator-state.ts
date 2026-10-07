@@ -353,8 +353,8 @@ function basename(name: unknown): string {
   ).toLowerCase();
 }
 
-// The catalogue publishes the adapter under versioned names (V1, V1.2, ...).
-const OVERHAUL_FILE = /^vnccs_qi2_animeoverhaulv\d+(?:\.\d+)*\.safetensors$/;
+// The catalogue publishes the adapter under versioned names (V1, V1.2, V1_2, ...).
+const OVERHAUL_FILE = /^vnccs_qi2_animeoverhaulv\d+(?:[._]\d+)*\.safetensors$/;
 
 /** The overhaul LoRA has its own control and never belongs in the manual stack. */
 export function isCreatorOverhaulLora(name: unknown): boolean {

@@ -179,6 +179,11 @@ describe("Creator QI2 overhaul (ported widget tests)", () => {
       )
     ).toBe(true);
     expect(
+      isCreatorOverhaulLora(
+        "QI2.1\\VNCCS\\VNCCS_QI2_AnimeOverhaulV1_2.safetensors"
+      )
+    ).toBe(true);
+    expect(
       isCreatorOverhaulLora("VNCCS_QI2_AnimeOverhaulV1.safetensors.bak")
     ).toBe(false);
   });

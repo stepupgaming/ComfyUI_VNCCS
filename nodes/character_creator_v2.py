@@ -40,6 +40,7 @@ from .character_styles import (
     square_style_resolution, save_style_preview, save_user_style_preview,
     STYLE_PREVIEWS_DIR,
 )
+from . import vnccs_control_center as control_center
 
 # --------------------------------------------------------------------
 # Helper Functions
@@ -181,12 +182,6 @@ QI2_DEFAULTS = {
     "qi2_overhaul_strength": 0.5,
     "lora_stack": [],
     "qi2_cache": {"device": "gpu", "dtype": "int8"},
-}
-QI2_TURBO_ENTRY = {
-    "name": "Qwen Image 2.1 Viggle Turbo",
-    "type": "TurboLora",
-    "kind": "QI2",
-    "local_path": f"models/loras/{QI2_TURBO_LORA_NAME}",
 }
 QI2_TEXT_GENERATION_DEFAULTS = {
     "max_length": 2048,
@@ -667,13 +662,13 @@ def normalize_overhaul_strength(value):
     return math.floor(max(0.0, min(1.0, strength)) * 4 + 0.5) / 4
 
 
-# The catalogue publishes the adapter under versioned names (V1, V1.2, ...).
-QI2_OVERHAUL_FILE_RE = re.compile(r"^vnccs_qi2_animeoverhaulv(\d+(?:\.\d+)*)\.safetensors$")
+# The catalogue publishes the adapter under versioned names (V1, V1.2, V1_2, ...).
+QI2_OVERHAUL_FILE_RE = re.compile(r"^vnccs_qi2_animeoverhaulv(\d+(?:[._]\d+)*)\.safetensors$")
 
 
 def _overhaul_version(name):
     match = QI2_OVERHAUL_FILE_RE.match(str(name or "").replace("\\", "/").rsplit("/", 1)[-1].lower())
-    return tuple(int(part) for part in match.group(1).split(".")) if match else None
+    return tuple(int(part) for part in re.split(r"[._]", match.group(1))) if match else None
 
 
 def is_creator_overhaul_lora(name):
@@ -681,11 +676,17 @@ def is_creator_overhaul_lora(name):
 
 
 def resolve_creator_overhaul_lora():
-    """The installed adapter: the pinned name, else the newest installed version."""
-    if get_lora_full_path(QI2_OVERHAUL_LORA_NAME):
-        return QI2_OVERHAUL_LORA_NAME
-    installed = [name for name in safe_filename_list("loras") if is_creator_overhaul_lora(name)]
-    return max(installed, key=_overhaul_version) if installed else None
+    """The installed adapter: the catalogue's file, else the pinned name, else the newest installed version."""
+    config = control_center._get_cc_config("MIUProject/VNCCS_v3.0")
+    entry = control_center._find_entry(config.get("lora", []), "VNCCS Overhaul QI2")
+    lora_path, installed = control_center._find_model_on_disk(entry.get("local_path", "")) if entry else (None, False)
+    if installed:
+        return lora_path
+    legacy_path = get_lora_full_path(QI2_OVERHAUL_LORA_NAME)
+    if legacy_path:
+        return legacy_path
+    names = [name for name in safe_filename_list("loras") if is_creator_overhaul_lora(name)]
+    return max(names, key=_overhaul_version) if names else None
 
 
 def apply_creator_overhaul(model, clip, gen_settings, apply_lora):
@@ -1199,14 +1200,23 @@ def prepare_qi2_model(model, gen_settings):
     from .character_generator import VNCCS_CharacterGenerator
 
     turbo_enabled = bool(gen_settings.get("turbo_enabled"))
-    pipe = SimpleNamespace(
-        lora_entries=[dict(QI2_TURBO_ENTRY)],
-        lora_states=[{
-            "name": QI2_TURBO_ENTRY["name"],
-            "auto_apply": turbo_enabled,
+    lora_entries, lora_states = [], []
+    if turbo_enabled:
+        config = control_center._apply_active_installed_paths(control_center._get_cc_config("MIUProject/VNCCS_v3.0"))
+        entries = [entry for entry in config.get("lora", [])
+                   if control_center._entry_kind(entry) == "qi2" and control_center._entry_type(entry) == "turbolora"]
+        selected = str(gen_settings.get("dmd_lora_name", "") or "").strip().replace("\\", "/")
+        entry = next((item for item in entries if control_center._rel_within_folder(item.get("local_path", "")) == selected), None)
+        entry = entry or control_center._find_entry(entries, "Qwen Image 2.1 Viggle Turbo")
+        if entry is None:
+            raise ValueError("QI2 Turbo LoRA is not configured in the Control Center catalog.")
+        lora_entries = [dict(entry)]
+        lora_states = [{
+            "name": entry["name"],
+            "auto_apply": True,
             "strength": float(gen_settings.get("dmd_lora_strength", 1.0) or 1.0),
-        }],
-    )
+        }]
+    pipe = SimpleNamespace(lora_entries=lora_entries, lora_states=lora_states)
     generator = VNCCS_CharacterGenerator()
     prepared, turbo = generator._qi2_prepare_model(
         model,

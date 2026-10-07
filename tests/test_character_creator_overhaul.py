@@ -6,9 +6,38 @@ from types import SimpleNamespace
 
 import pytest
 from conftest import _preload_node
+from nodes import vnccs_control_center as control_center
 
 pytest.importorskip("torch")
 creator = _preload_node("character_creator_v2")
+
+
+@pytest.mark.parametrize("rel_path", [
+    "QI2.1/VNCCS/VNCCS_QI2_AnimeOverhaulV1.2.safetensors",
+    "QI2.1\\VNCCS\\VNCCS_QI2_AnimeOverhaulV1_2.safetensors",
+    "VNCCS_QI2_AnimeOverhaulV1.2.safetensors",
+])
+@pytest.mark.parametrize("legacy_installed", [False, True])
+def test_installed_catalog_overhaul_is_loaded_instead_of_hardcoded_v1(monkeypatch, tmp_path, rel_path, legacy_installed):
+    catalog_path = "models/loras/QI2.1/VNCCS/" + rel_path.replace("\\", "/").split("/")[-1]
+    monkeypatch.setattr(control_center, "_get_cc_config", lambda repo: {"lora": [{
+        "name": "VNCCS Overhaul QI2", "local_path": catalog_path, "version": "1.2",
+    }]})
+    monkeypatch.setattr(creator.folder_paths, "get_folder_paths", lambda category: [str(tmp_path)])
+    installed = tmp_path / rel_path.replace("\\", "/")
+    installed.parent.mkdir(parents=True, exist_ok=True)
+    installed.write_bytes(b"installed adapter")
+    # Even with V1 present, the catalog's current version must win.
+    if legacy_installed:
+        legacy = tmp_path / creator.QI2_OVERHAUL_LORA_NAME
+        legacy.parent.mkdir(parents=True, exist_ok=True)
+        legacy.write_bytes(b"legacy adapter")
+    calls = []
+    def apply(model, clip, name, *strengths):
+        calls.append((creator.get_lora_full_path(name), strengths))
+        return "patched", clip
+    assert creator.apply_creator_overhaul("model", "clip", {"generation_mode": "qi2"}, apply) == ("patched", "clip")
+    assert calls == [(str(installed), (.5, 0.0))]
 
 
 @pytest.mark.parametrize("value, expected", [(None, .5), ("", .5), ("bad", .5), (float("nan"), .5), (float("inf"), .5), (-1, 0), (2, 1), (0, 0), (.25, .25), (.5, .5), (.75, .75), (1, 1), (.37, .25), (.38, .5)])
@@ -45,22 +74,25 @@ def test_overhaul_only_patches_diffusion_weights(monkeypatch, strength):
     result = creator.apply_creator_overhaul("model", "clip", {
         "generation_mode": "qi2", "qi2_overhaul_strength": strength,
     }, apply)
-    assert calls == [("model", "clip", creator.QI2_OVERHAUL_LORA_NAME, strength, 0.0)]
+    assert calls == [("model", "clip", "/test/overhaul.safetensors", strength, 0.0)]
     assert result == ("patched-model", "clip")
 
 
 def test_missing_enabled_overhaul_has_an_actionable_error(monkeypatch):
+    monkeypatch.setattr(control_center, "_get_cc_config", lambda repo: {"lora": []})
     monkeypatch.setattr(creator, "get_lora_full_path", lambda name: None)
     monkeypatch.setattr(creator, "safe_filename_list", lambda category: ["other.safetensors"])
     with pytest.raises(ValueError, match="Download.*or set its strength to 0"):
         creator.apply_creator_overhaul("model", "clip", {"generation_mode": "qi2"}, None)
 
 
-def test_versioned_catalogue_download_is_applied_when_the_pinned_name_is_absent(monkeypatch):
+def test_newest_installed_version_is_applied_without_a_catalogue_entry_or_pinned_file(monkeypatch):
+    monkeypatch.setattr(control_center, "_get_cc_config", lambda repo: {"lora": []})
     monkeypatch.setattr(creator, "get_lora_full_path", lambda name: None)
     monkeypatch.setattr(creator, "safe_filename_list", lambda category: [
         "other.safetensors",
         "QI2.1\\VNCCS\\VNCCS_QI2_AnimeOverhaulV1.2.safetensors",
+        "QI2.1/VNCCS/VNCCS_QI2_AnimeOverhaulV1_9.safetensors",
         "QI2.1/VNCCS/VNCCS_QI2_AnimeOverhaulV1.10.safetensors",
         "QI2.1/VNCCS/VNCCS_QI2_AnimeOverhaulV1.safetensors.bak",
     ])
@@ -75,12 +107,9 @@ def test_versioned_catalogue_download_is_applied_when_the_pinned_name_is_absent(
 
 
 @pytest.mark.parametrize("mode", ["qi2", "anima", "illustrious"])
-@pytest.mark.parametrize("name", [
-    creator.QI2_OVERHAUL_LORA_NAME.replace("/", "\\"),
-    "QI2.1/VNCCS/VNCCS_QI2_AnimeOverhaulV1.2.safetensors",
-])
-def test_manual_slots_cannot_double_apply_or_leak_overhaul(mode, name):
-    stack = [{"name": name, "strength": .5},
+@pytest.mark.parametrize("version", ["1", "1.2", "1_2"])
+def test_manual_slots_cannot_double_apply_or_leak_overhaul(mode, version):
+    stack = [{"name": f"QI2.1\\VNCCS\\VNCCS_QI2_AnimeOverhaulV{version}.safetensors", "strength": .5},
              {"name": "other.safetensors", "strength": .75}]
     normalized = creator.normalize_gen_settings({"generation_mode": mode, "lora_stack": stack})
     assert normalized["lora_stack"] == [stack[1]]
