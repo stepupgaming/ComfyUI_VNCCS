@@ -90,7 +90,8 @@ fn kill_tree(process: &mut Child) {
 
 /// Put the app in a job Windows terminates when the app's last handle closes,
 /// so a runtime it started (and the interpreter the venv launcher spawns)
-/// cannot outlive a crash or a forced kill and keep models loaded.
+/// cannot outlive a crash or a forced kill and keep models loaded. Every
+/// process the app starts afterwards joins the job too and ends with the app.
 #[cfg(windows)]
 fn end_children_with_app() {
   use std::sync::Once;
